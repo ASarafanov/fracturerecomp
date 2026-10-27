@@ -1,5 +1,9 @@
 # FractureRecomp
 
+<p align="center">
+  <img src="banner.jpg" alt="Fracture Recomp" width="420">
+</p>
+
 An unofficial native recompilation of the Xbox 360 version of **Fracture**
 (Day 1 Studios / LucasArts, 2008) for Windows, built on the
 [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk).
