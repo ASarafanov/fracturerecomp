@@ -1,0 +1,57 @@
+# Function boundary overrides for Fracture codegen.
+# Entries define additional guest function starts and explicit end addresses.
+
+[functions]
+
+# Small virtual methods reached only through vtables and through
+# this-adjusting thunks ("addi r3/r4,-N; b target"). They sit between two
+# discovered functions, often right after a "bctr" virtual-call stub, so the
+# analyzer never marks them as code. Each one ends where the next discovered
+# function starts.
+"0x8234A580" = { end = 0x8234A590 }
+"0x82371318" = { end = 0x82371328 }
+"0x825CD190" = { end = 0x825CD198 }
+"0x825EE9B8" = { end = 0x825EE9C0 }
+"0x825F0688" = { end = 0x825F0698 }
+"0x826F1A58" = { end = 0x826F1A60 }
+"0x82B5F998" = { end = 0x82B5F9A8 }
+"0x82BD1C20" = { end = 0x82BD1C30 }
+"0x82CBE210" = { end = 0x82CBE220 }
+"0x82E55720" = { end = 0x82E55730 }
+"0x82EF3FA8" = { end = 0x82EF3FB8 }
+"0x82F7E6E8" = { end = 0x82F7E6F8 }
+"0x83009758" = { end = 0x83009768 }
+"0x830763D0" = { end = 0x830763E0 }
+
+# Reached only through function pointers; found by the runtime's
+# "call to invalid or unregistered function" check.
+"0x82C695F0" = { end = 0x82C69600 }
+
+# Tail-call targets that end right where their caller starts.
+"0x8263A8B4" = { end = 0x8263A8BC }
+"0x82DFDD80" = { end = 0x82DFDD8C }
+
+# Tail call from sub_82AE42A8.
+"0x82ACA730" = { end = 0x82ACA738 }
+
+# Functions whose last instruction is "bl 0x8224AC00" (_CxxThrowException,
+# r3 = r4 = 0 is a rethrow). That call never returns, but the analyzer assumes
+# it does and runs on into the 8 bytes of EH data that follow (handler pointer
+# 0x8224AE68 decodes as "lwz r17,-20888(r4)") and the catch funclet after it.
+# Each function ends right after the call.
+"0x8271E17C" = { end = 0x8271E1A8 }
+"0x82721DC8" = { end = 0x82721E20 }
+"0x827263EC" = { end = 0x82726454 }
+"0x8272B3C4" = { end = 0x8272B440 }
+"0x8272B848" = { end = 0x8272B8A0 }
+"0x8272BC70" = { end = 0x8272BCEC }
+"0x827345C8" = { end = 0x82734620 }
+"0x82738F04" = { end = 0x82738F80 }
+"0x827405E0" = { end = 0x82740638 }
+"0x827409FC" = { end = 0x82740A54 }
+"0x8274396C" = { end = 0x827439D4 }
+"0x82744880" = { end = 0x827448FC }
+"0x8274523C" = { end = 0x827452B8 }
+"0x82747A04" = { end = 0x82747A6C }
+"0x82749138" = { end = 0x827491B4 }
+"0x8274CD00" = { end = 0x8274CD80 }

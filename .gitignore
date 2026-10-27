@@ -1,0 +1,13 @@
+# Retail game data: never commit (supply your own legally obtained copy).
+*.iso
+game/
+
+# Codegen output is derived from the retail XEX; regenerate it at build time.
+generated/*
+!generated/rexglue.cmake
+
+# Prebuilt ReXGlue SDK (downloaded from the GitHub release).
+third_party/rexglue-sdk/
+
+# Build output
+out/
