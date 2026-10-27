@@ -8,11 +8,9 @@ The game's PowerPC code is translated to C++ ahead of time and compiled into a
 regular Windows executable. Rendering goes through the SDK's emulated Xenos GPU
 (Direct3D 12 / Vulkan).
 
-> **Status: early.** The game boots and keeps running: its main loop runs at
-> about 30 updates per second for at least a minute without errors, shaders
-> compile, and audio and controllers initialize. What it shows on screen has
-> not been checked yet, and nothing has been played. See
-> [Development](#development) for where this stands.
+> **Status: early.** The game boots and runs on the test machine (Windows 11,
+> GeForce RTX 4080 SUPER). It has not been played through or tried on other
+> hardware yet. See [Development](#development) for where this stands.
 
 This repository contains **no game files and no code generated from them**. You
 must provide your own legally obtained Xbox 360 copy of Fracture; everything
@@ -36,13 +34,15 @@ winget install --id LLVM.LLVM
 - A disc image (`.iso`) of the Xbox 360 release of Fracture. The supported
   executable is title ID `4C4107D4`, `default.xex` SHA-256
   `13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2`.
+- About 5 GB of free disk space, not counting the `.iso`
 
 ## Setup
 
-Drag your `.iso` onto `setup.bat`, or run:
+Drag your `.iso` onto `setup.bat`, or run it from the repository folder (the
+same command works in Command Prompt and PowerShell):
 
 ```
-setup.bat path\to\Fracture.iso
+.\setup.bat path\to\Fracture.iso
 ```
 
 Without an argument it uses the single `.iso` in the repository folder, or asks
@@ -52,14 +52,21 @@ you to pick one. The setup program:
 2. extracts the game files into `game\` (about 4 GB);
 3. downloads the ReXGlue SDK 0.10.0 release and verifies its SHA-256 before
    unpacking it into `third_party\rexglue-sdk\`;
-4. recompiles `default.xex` and builds `fracture.exe` (several minutes);
+4. recompiles `default.xex` and builds `fracture.exe` (about 5 minutes on a
+   16-thread CPU);
 5. writes `fracture.toml` next to `fracture.exe` so it finds `game\`.
 
-Running it again skips the steps that are already done. Pass
+When started by double-click or from PowerShell, it waits for a key press at
+the end. Running it again skips the steps that are already done. Pass
 `--config release` or `--config debug` for another build type
 (default: `relwithdebinfo`).
 
-Then start `out\build\win-amd64-relwithdebinfo\fracture.exe`.
+Then double-click `out\build\win-amd64-relwithdebinfo\fracture.exe`, or run
+it from PowerShell (a quoted path needs `&` in front):
+
+```
+& .\out\build\win-amd64-relwithdebinfo\fracture.exe
+```
 
 ### Antivirus
 
