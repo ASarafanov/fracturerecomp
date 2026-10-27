@@ -9,6 +9,8 @@
 
 #include <cstdint>
 #include <fstream>
+#include <functional>
+#include <optional>
 #include <string>
 
 REXCVAR_DECLARE(std::string, fracture_dump_image);
@@ -47,10 +49,23 @@ class FractureApp : public rex::ReXApp {
     }
   }
 
+  // The SDK reads game_data_root before it loads fracture.toml, so a value
+  // set there (tools/setup.py writes one) would be ignored. Pick it up here,
+  // after the config file has been applied.
+  std::optional<rex::PathConfig> OnFinalizePaths(
+      const rex::PathConfig& defaults,
+      std::function<void(rex::PathConfig)> resume) override {
+    (void)resume;
+    rex::PathConfig paths = defaults;
+    if (paths.game_data_root.empty()) {
+      paths.game_data_root = REXCVAR_GET(game_data_root);
+    }
+    return paths;
+  }
+
   // Override virtual hooks for customization:
   // void OnPostInitLogging() override {}
   // void OnLoadXexImage(std::string& xex_image) override {}
-  // void OnPostLoadXexImage() override {}
   // void OnPostSetup() override {}
   // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
   // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
