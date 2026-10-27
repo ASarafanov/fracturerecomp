@@ -1,0 +1,133 @@
+# Functions whose address is built in code with "lis rX,hi" followed by
+# "addi rY,rX,lo" or "ori rY,rX,lo" (callbacks, pointers to virtual member
+# functions such as vcall thunks) and that nothing calls directly, so the
+# analyzer does not discover them.
+#
+# Generated: tools/dev/scan_refs.py --code <image dump> generated/default,
+# then tools/dev/prune_splits.py with each codegen log until codegen is clean:
+# it removes hits that cut another function in two and adds functions that a
+# scanned thunk tail-calls. Entries are start-only; the analyzer sizes each
+# function itself.
+
+[functions]
+
+"0x822C1B30" = {}
+"0x82313C30" = {}
+"0x82313C40" = {}
+"0x82313C50" = {}
+"0x82313C60" = {}
+"0x82313C70" = {}
+"0x82313C80" = {}
+"0x82315FD0" = {}
+"0x82315FE0" = {}
+"0x82315FF0" = {}
+"0x8231B7A8" = {}
+"0x82322400" = {}
+"0x823224C8" = {}
+"0x823224D0" = {}
+"0x823224E0" = {}
+"0x82329C88" = {}
+"0x82347B40" = {}
+"0x8234A230" = {}
+"0x8234A240" = {}
+"0x8234D1F8" = {}
+"0x82371308" = {}
+"0x823758D0" = {}
+"0x823A0170" = {}
+"0x823A0180" = {}
+"0x823A0190" = {}
+"0x823A01A0" = {}
+"0x823A01B0" = {}
+"0x823A01C0" = {}
+"0x823A01D0" = {}
+"0x823A01E0" = {}
+"0x823AE998" = {}
+"0x823AE9A8" = {}
+"0x823D5310" = {}
+"0x823D5320" = {}
+"0x823D5330" = {}
+"0x823D5340" = {}
+"0x824936C0" = {}
+"0x824C1350" = {}
+"0x824C1360" = {}
+"0x824C1370" = {}
+"0x824C1380" = {}
+"0x82791288" = {}
+"0x82791298" = {}
+"0x827912A8" = {}
+"0x827912B8" = {}
+"0x827DF1E8" = {}
+"0x82832E20" = {}
+"0x82832E48" = {}
+"0x82832E70" = {}
+"0x82832E88" = {}
+"0x82832EA0" = {}
+"0x82832EB8" = {}
+"0x82832ED0" = {}
+"0x82A6D5A0" = {}
+"0x82AA4A08" = {}
+"0x82BD1BF0" = {}
+"0x82BD1C00" = {}
+"0x82BD1C10" = {}
+"0x82C3EAA0" = {}
+"0x82C5EAC0" = {}
+"0x82C63190" = {}
+"0x82C8E338" = {}
+"0x82C9FFE8" = {}
+"0x82CA0028" = {}
+"0x82CA0038" = {}
+"0x82CBE200" = {}
+"0x82CC3E70" = {}
+"0x82CFBA08" = {}
+"0x82D58C98" = {}
+"0x82D58CC0" = {}
+"0x82D58CD0" = {}
+"0x82D85290" = {}
+"0x82D852A0" = {}
+"0x82D87B58" = {}
+"0x82DDE630" = {}
+"0x82DDE820" = {}
+"0x82DDE830" = {}
+"0x82DDE840" = {}
+"0x82DDE850" = {}
+"0x82DDE860" = {}
+"0x82DDE870" = {}
+"0x82DDE880" = {}
+"0x82DDE890" = {}
+"0x82DFDBB8" = {}
+"0x82DFDBC8" = {}
+"0x82DFDBD8" = {}
+"0x82E3F8B0" = {}
+"0x82E4A000" = {}
+"0x82E74290" = {}
+"0x82EE3238" = {}
+"0x82F96508" = {}
+"0x82FBFB18" = {}
+"0x82FBFB30" = {}
+"0x82FBFB48" = {}
+"0x82FBFB60" = {}
+"0x82FBFB78" = {}
+"0x82FBFB90" = {}
+"0x82FBFBA8" = {}
+"0x82FC0108" = {}
+"0x82FC0118" = {}
+"0x82FC0128" = {}
+"0x83028870" = {}
+"0x83028880" = {}
+"0x83061D68" = {}
+"0x830AA828" = {}
+"0x830AA830" = {}
+"0x830FECF0" = {}
+"0x83116460" = {}
+"0x8312CE60" = {}
+"0x8312D1A8" = {}
+"0x83223D40" = {}
+"0x83223D78" = {}
+"0x83223D80" = {}
+"0x8322C0C0" = {}
+"0x8322C0D0" = {}
+"0x8322C0E0" = {}
+"0x83239BF8" = {}
+"0x83246B98" = {}
+"0x832546D0" = {}
+"0x832546E8" = {}

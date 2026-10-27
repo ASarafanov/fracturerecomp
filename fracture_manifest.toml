@@ -11,4 +11,5 @@ out_directory_path = "generated/default"
 includes = [
   "config/fracture_functions.toml",
   "config/fracture_data_refs.toml",
+  "config/fracture_code_refs.toml",
 ]

@@ -13,6 +13,7 @@ include(generated/rexglue.cmake)
 # Sources
 set(FRACTURE_SOURCES
     src/main.cpp
+    src/fracture_hooks.cpp
 )
 
 if(WIN32)

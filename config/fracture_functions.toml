@@ -27,8 +27,17 @@
 # "call to invalid or unregistered function" check.
 "0x82C695F0" = { end = 0x82C69600 }
 
-# Tail-call targets that end right where their caller starts.
-"0x8263A8B4" = { end = 0x8263A8BC }
+# Functions the analyzer had cut into pieces. Both are referenced only from
+# vtables, and the scan rejects them because they run into a known function.
+# 0x8263A850 runs to its only blr at 0x8263A8CC; 0x8263A8B4 and 0x8263A8BC
+# are labels inside it.
+"0x8263A850" = { end = 0x8263A8D0 }
+# 0x82DFDD68 (QueryInterface-style) shares its tail at 0x82DFDD80 with
+# 0x82DFDD8C, which jumps there with "b 0x82DFDD80". Functions cannot
+# overlap, so the tail stays a function of its own for that jump, codegen
+# gets 0x82DFDD68 up to the tail, and src/fracture_hooks.cpp replaces it
+# with the whole function.
+"0x82DFDD68" = { end = 0x82DFDD80 }
 "0x82DFDD80" = { end = 0x82DFDD8C }
 
 # Tail call from sub_82AE42A8.

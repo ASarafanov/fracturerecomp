@@ -8,12 +8,11 @@ The game's PowerPC code is translated to C++ ahead of time and compiled into a
 regular Windows executable. Rendering goes through the SDK's emulated Xenos GPU
 (Direct3D 12 / Vulkan).
 
-> **Status: early, not playable.** The project builds and the game starts
-> executing: it gets through static initialization and its first file access,
-> then stops about a second in with
-> `Call to invalid or unregistered function at guest address 0x823A01E0`
-> (a virtual-call thunk that the code takes the address of with `lis`/`addi`).
-> See [Development](#development) for where this stands.
+> **Status: early.** The game boots and keeps running: its main loop runs at
+> about 30 updates per second for at least a minute without errors, shaders
+> compile, and audio and controllers initialize. What it shows on screen has
+> not been checked yet, and nothing has been played. See
+> [Development](#development) for where this stands.
 
 This repository contains **no game files and no code generated from them**. You
 must provide your own legally obtained Xbox 360 copy of Fracture; everything
@@ -78,10 +77,12 @@ exclude the `third_party\rexglue-sdk` folder is your decision.
 | `fracture_manifest.toml` | Codegen manifest: input XEX and config includes |
 | `config/fracture_functions.toml` | Hand-checked function boundary overrides |
 | `config/fracture_data_refs.toml` | Function starts referenced only from data, found by scanning the guest image |
+| `config/fracture_code_refs.toml` | Function starts whose address is built in code with `lis` + `addi`/`ori` |
 | `src/fracture_app.h` | App hooks: Xenos GPU by default, `game_data_root` from `fracture.toml`, image dump |
+| `src/fracture_hooks.cpp` | Hand-written guest functions that codegen cannot express |
 | `tools/setup.py` | The setup program |
 | `tools/xdvdfs.py` | Xbox disc image reader |
-| `tools/dev/` | Analysis helpers used to produce the configs |
+| `tools/dev/` | Analysis helpers used to produce the configs (`scan_refs.py`, `prune_splits.py`, `fallthrough.py`) |
 
 Findings so far:
 
@@ -96,8 +97,23 @@ Findings so far:
   that end in a rethrow (`r3 = r4 = 0`) are followed by exception-handler data,
   and the analyzer ran on into it; `tools/dev/fallthrough.py` finds them and
   the overrides end each one right after the call.
-- **Next:** functions whose address is built in code with `lis`/`addi` (for
-  example the virtual-call thunk at `0x823A01E0`), then missing kernel
+- **Addresses built in code.** Callbacks and pointers to virtual member
+  functions (for example the virtual-call thunk at `0x823A01E0`) are formed
+  with `lis` and a later `addi`/`ori`, often with the high half kept in a
+  non-volatile register far from its use. `scan_refs.py --code` tracks `lis`
+  values through each function; `config/fracture_code_refs.toml` lists the
+  120 hits that survived.
+- **Reconciling scans with codegen.** `tools/dev/prune_splits.py` reads a
+  codegen log and fixes the scanned list: it drops hits that cut another
+  function in two (catch-handler continuation labels in `0x8272xxxx`, switch
+  labels) and adds functions that a scanned thunk tail-calls. Run codegen and
+  the script until codegen is clean.
+- **Shared tails.** The compiler merges identical function endings, so a
+  function can run into, or branch into, the tail of its neighbour. Guest
+  functions cannot overlap, so `0x82DFDD68` gets its shared tail from a
+  hand-written copy in `src/fracture_hooks.cpp`, and `0x8263A850` is
+  declared whole in `config/fracture_functions.toml`.
+- **Next:** look at what the game actually shows, then missing kernel
   imports and GPU issues as they come up.
 
 The image dump is decrypted retail code: keep it out of the repository.
