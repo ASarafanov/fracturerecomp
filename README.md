@@ -1,4 +1,4 @@
-# fracturerecomp
+# FractureRecomp
 
 An unofficial native recompilation of the Xbox 360 version of **Fracture**
 (Day 1 Studios / LucasArts, 2008) for Windows, built on the
