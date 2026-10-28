@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -28,6 +29,10 @@ void Load(const std::filesystem::path& base_config_path);
 // written. Live cvar values are not touched: settings that need a restart are
 // only written here. Returns false if the file could not be written.
 bool Save(const std::vector<std::pair<std::string, std::string>>& changes);
+
+// True when two texts mean the same value of cvar `name`, e.g. "60" and
+// "60.000000" for a double. Unknown cvars compare as text.
+bool SameValue(std::string_view name, std::string_view a, std::string_view b);
 
 // Starts another fracture.exe with this process's command line plus
 // --fracture_restart_wait_pid, so it waits for this one to exit first.

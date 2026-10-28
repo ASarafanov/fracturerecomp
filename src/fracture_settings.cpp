@@ -57,31 +57,34 @@ bool ParseInteger(std::string_view text, T& out) {
   return ec == std::errc() && ptr == text.data() + text.size();
 }
 
-// Defaults are stored as text in whatever form the cvar macro produced
-// ("60.000000" for a double), so compare by value, not by spelling.
-bool IsDefault(const FlagEntry& entry, std::string_view value) {
-  if (value == entry.default_value) {
+// Values are text in whatever form their writer produced ("60.000000" from
+// the cvar macro, "60" from the menu), so compare by value, not by spelling.
+bool ValuesEqual(FlagType type, std::string_view a, std::string_view b) {
+  if (a == b) {
     return true;
   }
-  switch (entry.type) {
+  switch (type) {
     case FlagType::Boolean: {
-      bool a = false;
-      bool b = false;
-      return ParseBool(value, a) && ParseBool(entry.default_value, b) && a == b;
+      bool x = false;
+      bool y = false;
+      return ParseBool(a, x) && ParseBool(b, y) && x == y;
     }
     case FlagType::Int32:
     case FlagType::Int64:
     case FlagType::Uint32:
     case FlagType::Uint64:
     case FlagType::Double: {
-      double a = 0.0;
-      double b = 0.0;
-      return rex::cvar::ParseDouble(value, a) &&
-             rex::cvar::ParseDouble(entry.default_value, b) && a == b;
+      double x = 0.0;
+      double y = 0.0;
+      return rex::cvar::ParseDouble(a, x) && rex::cvar::ParseDouble(b, y) && x == y;
     }
     default:
       return false;
   }
+}
+
+bool IsDefault(const FlagEntry& entry, std::string_view value) {
+  return ValuesEqual(entry.type, value, entry.default_value);
 }
 
 // Stores the value with the cvar's own TOML type so the file stays easy to
@@ -280,6 +283,11 @@ bool Save(const std::vector<std::pair<std::string, std::string>>& changes) {
   }
   REXLOG_INFO("Settings: saved {} change(s) to {}", applied, path.string());
   return true;
+}
+
+bool SameValue(std::string_view name, std::string_view a, std::string_view b) {
+  const FlagEntry* entry = rex::cvar::GetFlagInfo(name);
+  return entry ? ValuesEqual(entry->type, a, b) : a == b;
 }
 
 #if defined(_WIN32)
