@@ -5,7 +5,9 @@
 #pragma once
 
 #include <rex/cvar.h>
+#include <rex/logging.h>
 #include <rex/rex_app.h>
+#include <rex/ui/window.h>
 
 #include <cstdint>
 #include <fstream>
@@ -13,7 +15,10 @@
 #include <optional>
 #include <string>
 
+#include "fracture_settings.h"
+
 REXCVAR_DECLARE(std::string, fracture_dump_image);
+REXCVAR_DECLARE(std::string, fracture_dump_cvars);
 
 class FractureApp : public rex::ReXApp {
  public:
@@ -63,14 +68,49 @@ class FractureApp : public rex::ReXApp {
     return paths;
   }
 
+  // A restarted process must not start while the old one still holds the
+  // log files, so wait here, before logging is initialized.
+  void OnConfigurePaths(rex::PathConfig& paths) override {
+    fracture::settings::WaitForPreviousProcess();
+    base_config_path_ = paths.config_path;
+  }
+
+  // fracture.toml has just been applied; settings.toml goes on top of it,
+  // before the window and the GPU plugin read their cvars.
+  void OnPostInitLogging() override { fracture::settings::Load(base_config_path_); }
+
+  // Debug aid: --fracture_dump_cvars=<file> lists every cvar. The GPU plugin
+  // is loaded by now, so its cvars are included.
+  void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+    (void)drawer;
+    const std::string path = REXCVAR_GET(fracture_dump_cvars);
+    if (!path.empty() && !fracture::settings::DumpCvars(path)) {
+      REXLOG_ERROR("Failed to write cvar dump to {}", path);
+    }
+  }
+
   // Override virtual hooks for customization:
-  // void OnPostInitLogging() override {}
   // void OnLoadXexImage(std::string& xex_image) override {}
   // void OnPostSetup() override {}
-  // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
   // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
   // std::unique_ptr<rex::ui::AchievementNotificationDialog>
   // CreateAchievementNotificationDialog() override;
   // void OnShutdown() override {}
-  // void OnConfigurePaths(rex::PathConfig& paths) override {}
+
+ private:
+  // Starts a fresh fracture.exe (it waits for this one to exit) and closes
+  // this one, so settings that need a restart take effect.
+  void RestartGame() {
+    if (!fracture::settings::StartRestartedProcess()) {
+      return;
+    }
+    app_context().CallInUIThreadDeferred([this]() {
+      if (window()) {
+        window()->RequestClose();
+      }
+    });
+  }
+
+  // fracture.toml, as the SDK resolved it.
+  std::filesystem::path base_config_path_;
 };
