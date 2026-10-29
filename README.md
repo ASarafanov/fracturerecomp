@@ -10,7 +10,7 @@ An unofficial native recompilation of the Xbox 360 version of **Fracture**
 
 The game's PowerPC code is translated to C++ ahead of time and compiled into a
 regular Windows executable. Rendering goes through the SDK's emulated Xenos GPU
-(Direct3D 12).
+on Direct3D 12 or Vulkan.
 
 > **Status: early.** The game boots and runs on the test machine (Windows 11,
 > GeForce RTX 4080 SUPER). It has not been played through or tried on other
@@ -27,18 +27,20 @@ derived from it is produced on your machine by the setup program.
 - Visual Studio 2022 Build Tools with the C++ workload (provides the MSVC
   libraries, the Windows SDK, CMake and Ninja)
 - LLVM/Clang 20 or newer
+- Git (setup downloads the ReXGlue SDK source with it)
 
 Install the build tools with:
 
 ```
 winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 winget install --id LLVM.LLVM
+winget install --id Git.Git
 ```
 
 - A disc image (`.iso`) of the Xbox 360 release of Fracture. The supported
   executable is title ID `4C4107D4`, `default.xex` SHA-256
   `13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2`.
-- About 5 GB of free disk space, not counting the `.iso`
+- About 8 GB of free disk space, not counting the `.iso`
 
 ## Setup
 
@@ -54,11 +56,14 @@ you to pick one. The setup program:
 
 1. checks that the image is the supported Fracture release;
 2. extracts the game files into `game\` (about 4 GB);
-3. downloads the ReXGlue SDK 0.10.0 release and verifies its SHA-256 before
-   unpacking it into `third_party\rexglue-sdk\`;
-4. recompiles `default.xex` and builds `fracture.exe` (about 5 minutes on a
-   16-thread CPU);
+3. downloads the ReXGlue SDK 0.10.0 source with Git (about 700 MB, checked
+   against the release tag's commit) and builds the SDK with Direct3D 12 and
+   Vulkan into `third_party\rexglue-sdk\`. The SDK's own Windows package has
+   no Vulkan;
+4. recompiles `default.xex` and builds `fracture.exe`;
 5. writes `fracture.toml` next to `fracture.exe` so it finds `game\`.
+
+Steps 3 and 4 take about 10 minutes on a 16-thread CPU the first time.
 
 When started by double-click or from PowerShell, it waits for a key press at
 the end. Running it again skips the steps that are already done. Pass
@@ -74,12 +79,12 @@ it from PowerShell (a quoted path needs `&` in front):
 
 ### Antivirus
 
-Microsoft Defender has flagged the official ReXGlue SDK release archive as a
-potentially unwanted program on at least one machine and removed it right
-after download. The setup program checks the archive against the SHA-256
-published on the SDK's GitHub release and stops if the file is altered or
-missing. Whether to allow the file (Windows Security > Protection history) or
-exclude the `third_party\rexglue-sdk` folder is your decision.
+Earlier versions downloaded the SDK's prebuilt release archive, which
+Microsoft Defender flagged as a potentially unwanted program on at least one
+machine. Setup now builds the SDK from source instead. If your antivirus
+still removes or blocks files under `third_party\rexglue-sdk`, whether to
+allow them (Windows Security > Protection history) or exclude that folder is
+your decision.
 
 ## Settings
 
@@ -90,7 +95,7 @@ keyboard, the mouse and a controller; the game gets no input while it is open.
 | Category | Settings |
 | --- | --- |
 | Display | Fullscreen, monitor, window size, keep aspect ratio, allow tearing |
-| Graphics | Frame rate (30, or 60 as an experiment), graphics card, internal resolution (1x to 4x), anti-aliasing (FXAA), texture filtering, render path (fast RTV or accurate ROV) |
+| Graphics | Frame rate (30, or 60 as an experiment), graphics API (Direct3D 12 or Vulkan), graphics card, internal resolution (1x to 4x), anti-aliasing (FXAA), texture filtering, render path (fast or accurate) |
 | Controls | Controller API (SDL or XInput), the shortcut that opens the screen, keyboard and mouse, mouse look and sensitivity |
 | Audio | Mute, audio latency |
 | System | Restart now, revert pending changes, close the screen, quit |
@@ -111,6 +116,10 @@ restart: press R (X on a controller) twice, or use System > Restart Now.
   default.
 - Command-line flags such as `--resolution_scale=2` win over both files. The
   screen marks those settings with `*`.
+- Graphics API "Automatic" uses Vulkan under Proton or Wine (Steam Deck,
+  Linux) and Direct3D 12 on Windows. Without a Vulkan driver or GPU the game
+  starts with Direct3D 12. If Vulkan is chosen and the game then fails to
+  start, delete the `fracture_graphics_api` line from `settings.toml`.
 - The game was made for 30 FPS. At 60 it kept its normal speed in testing,
   but some of its timers count frames, so 60 stays marked experimental.
 - The SDK's own overlays are still there: F3 toggles its debug overlay, the
@@ -131,6 +140,7 @@ restart: press R (X on a controller) twice, or use System > Restart Now.
 | `src/fracture_settings_dialog.{h,cpp}` | The settings screen |
 | `src/fracture_menu_input.{h,cpp}` | Controller input for the screen: wraps the game's `XamInputGetState` |
 | `src/fracture_frame_rate.{h,cpp}` | The 60 FPS option: the game's Direct3D presentation interval |
+| `src/fracture_graphics.{h,cpp}` | Direct3D 12 or Vulkan: loads the GPU plugin with the chosen API, lists the GPUs |
 | `tools/setup.py` | The setup program |
 | `tools/xdvdfs.py` | Xbox disc image reader |
 | `tools/dev/` | Analysis helpers used to produce the configs (`scan_refs.py`, `prune_splits.py`, `fallthrough.py`) |
@@ -171,9 +181,13 @@ Findings so far:
 - **Controller input.** Generated code calls the SDK's `XamInputGetState`
   directly, so `src/fracture_menu_input.cpp` defines that symbol, calls the
   SDK's function and filters what the game reads.
-- **Next:** missing kernel imports and GPU issues as they come up. A
-  Direct3D 12 / Vulkan switch needs an SDK build with Vulkan: the prebuilt
-  0.10.0 Windows GPU plugin is Direct3D 12 only.
+- **Vulkan.** The SDK's Windows package is built with Direct3D 12 only
+  (`REXGLUE_USE_VULKAN` defaults to off on Windows), so setup builds the SDK
+  from source with it on. Git checks the SDK's symlinks out as text files on
+  Windows; setup replaces the ones the build compiles (libmspack) with copies
+  of their targets.
+- **Next:** missing kernel imports and GPU issues as they come up; a native
+  Linux build for the Steam Deck.
 
 The image dump is decrypted retail code: keep it out of the repository.
 

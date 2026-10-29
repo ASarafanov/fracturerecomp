@@ -19,6 +19,7 @@
 #include <string>
 
 #include "fracture_frame_rate.h"
+#include "fracture_graphics.h"
 #include "fracture_menu_input.h"
 #include "fracture_settings.h"
 #include "fracture_settings_dialog.h"
@@ -53,10 +54,14 @@ class FractureApp : public rex::ReXApp {
   }
 
   // Fracture has no native renderer, so default to the emulated Xenos GPU
-  // unless the gpu_plugin cvar picks something else.
+  // unless the gpu_plugin cvar picks something else. The plugin is loaded
+  // here (the SDK skips its own load then) to pick Direct3D 12 or Vulkan.
   void OnPreSetup(rex::RuntimeConfig& config) override {
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
+    }
+    if (!config.graphics) {
+      config.graphics = fracture::graphics::LoadPlugin(config.gpu_plugin);
     }
   }
 

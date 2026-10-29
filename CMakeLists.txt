@@ -14,6 +14,7 @@ include(generated/rexglue.cmake)
 set(FRACTURE_SOURCES
     src/main.cpp
     src/fracture_frame_rate.cpp
+    src/fracture_graphics.cpp
     src/fracture_hooks.cpp
     src/fracture_menu_input.cpp
     src/fracture_settings.cpp
@@ -29,6 +30,6 @@ endif()
 rexglue_setup_target(fracture GPU_PLUGINS xenos)
 
 if(WIN32)
-    # Settings screen: lists the graphics adapters.
+    # Lists the Direct3D 12 adapters for the settings screen.
     target_link_libraries(fracture PRIVATE dxgi)
 endif()

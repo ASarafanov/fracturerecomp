@@ -2,9 +2,11 @@
 
 1. Check the disc image is the supported Fracture release.
 2. Extract the game files into game/.
-3. Download the ReXGlue SDK (checksum-verified) into third_party/.
-4. Recompile default.xex and build fracture.exe.
-5. Write fracture.toml next to fracture.exe so it finds the game files.
+3. Find the build tools.
+4. Build the ReXGlue SDK from its source (pinned commit) with Direct3D 12
+   and Vulkan into third_party/; the SDK's own Windows package has no Vulkan.
+5. Recompile default.xex and build fracture.exe.
+6. Write fracture.toml next to fracture.exe so it finds the game files.
 
 usage: setup.bat [path\\to\\Fracture.iso] [--config relwithdebinfo|release|debug]
                  [--force]
@@ -17,9 +19,8 @@ import shutil
 import struct
 import subprocess
 import sys
+import stat
 import tempfile
-import urllib.request
-import zipfile
 from pathlib import Path
 
 import xdvdfs
@@ -34,12 +35,19 @@ DEFAULT_XEX_SHA256 = (
 SKIPPED_ISO_DIRS = ("$SystemUpdate/",)  # console dashboard update, not game data
 
 SDK_VERSION = "0.10.0"
-SDK_ZIP = f"rexglue-sdk-{SDK_VERSION}-win-amd64.zip"
-SDK_URL = ("https://github.com/rexglue/rexglue-sdk/releases/download/"
-           f"v{SDK_VERSION}/{SDK_ZIP}")
-SDK_SHA256 = "ad4485da853fbe932e9f5dbb643f9b5fe85dc73775ebbad4df6879fe6df0c11b"
-SDK_DIR = ROOT / "third_party" / "rexglue-sdk" / SDK_VERSION
-SDK_REXGLUE = SDK_DIR / "win-amd64" / "bin" / "rexglue.exe"
+SDK_REPO = "https://github.com/rexglue/rexglue-sdk.git"
+SDK_TAG = f"v{SDK_VERSION}"
+# The tag's commit; git verifies every object (and the pinned submodule
+# commits) against it, so this plays the part of a checksum.
+SDK_COMMIT = "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2"
+SDK_ROOT = ROOT / "third_party" / "rexglue-sdk"
+SDK_SRC = SDK_ROOT / "src"
+# CMakePresets.json points CMAKE_PREFIX_PATH here.
+SDK_PREFIX = SDK_ROOT / SDK_VERSION / "win-amd64"
+# Written after a successful build: commit, "vulkan", installed configs.
+SDK_STAMP = SDK_PREFIX / "fracture-sdk-build.txt"
+SDK_CONFIGS = {"relwithdebinfo": "RelWithDebInfo", "release": "Release",
+               "debug": "Debug"}
 
 MIN_CLANG = 20
 
@@ -50,14 +58,6 @@ class SetupError(Exception):
 
 def step(text):
     print(f"\n== {text}", flush=True)
-
-
-def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def xex_title_id(data):
@@ -151,43 +151,13 @@ def extract_game(iso, entries):
     print(f"\nextracted {len(todo)} files")
 
 
-# --- 2. SDK ---------------------------------------------------------------
-
-def fetch_sdk():
-    step(f"ReXGlue SDK {SDK_VERSION}")
-    if SDK_REXGLUE.is_file():
-        print(f"already installed in {SDK_DIR}")
-        return
-    archive_dir = SDK_DIR.parent / "_archive"
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    archive = archive_dir / SDK_ZIP
-    if not archive.is_file() or sha256_file(archive) != SDK_SHA256:
-        print(f"downloading {SDK_URL}")
-        with urllib.request.urlopen(SDK_URL) as r, open(archive, "wb") as out:
-            shutil.copyfileobj(r, out)
-    if not archive.is_file():
-        raise SetupError(
-            f"{archive} disappeared right after download. Antivirus software "
-            "(e.g. Microsoft Defender) may have removed it; see README.md.")
-    digest = sha256_file(archive)
-    if digest != SDK_SHA256:
-        archive.unlink()
-        raise SetupError(f"SDK archive checksum mismatch: {digest}")
-    print("checksum OK, unpacking")
-    with zipfile.ZipFile(archive) as z:
-        z.extractall(SDK_DIR)
-    if not SDK_REXGLUE.is_file():
-        raise SetupError(
-            f"{SDK_REXGLUE} is missing after unpacking. Antivirus software may "
-            "have removed it; see README.md.")
-
-
-# --- 3. toolchain ---------------------------------------------------------
+# --- 2. toolchain ---------------------------------------------------------
 
 INSTALL_HINT = """
 Install the build tools (once), then run setup again:
   winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-  winget install --id LLVM.LLVM"""
+  winget install --id LLVM.LLVM
+  winget install --id Git.Git"""
 
 
 def vs_environment():
@@ -223,10 +193,14 @@ def find_toolchain():
     path = env.get("Path") or env.get("PATH", "")
     if llvm_bin.is_dir():
         path = f"{llvm_bin};{path}"
+    # A Git installed after this terminal was opened is not on its PATH yet.
+    git_cmd = Path(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "cmd")
+    if git_cmd.is_dir() and not shutil.which("git", path=path):
+        path = f"{path};{git_cmd}"
     env.pop("PATH", None)
     env["Path"] = path
     missing = []
-    for tool in ("clang", "clang++", "cmake", "ninja"):
+    for tool in ("clang", "clang++", "cmake", "ninja", "git"):
         found = shutil.which(tool, path=path)
         print(f"{tool:8} {found or 'NOT FOUND'}")
         if not found:
@@ -240,6 +214,134 @@ def find_toolchain():
         raise SetupError(f"clang {major} is too old, need {MIN_CLANG} or newer"
                          + INSTALL_HINT)
     return env
+
+
+# --- 3. SDK ---------------------------------------------------------------
+
+def run(args, cwd, env):
+    tool = shutil.which(args[0], path=env["Path"])
+    if subprocess.run([tool] + args[1:], cwd=cwd, env=env).returncode:
+        raise SetupError(f"'{' '.join(args)}' failed")
+
+
+def output(args, cwd, env):
+    tool = shutil.which(args[0], path=env["Path"])
+    return subprocess.run([tool] + args[1:], cwd=cwd, env=env, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def remove_tree(path):
+    """shutil.rmtree that also removes read-only files (git objects)."""
+    def retry(function, target, _):
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+    if not path.exists():
+        return
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
+def sdk_configs(config):
+    # The codegen tool (rexglue.exe) is only installed with Release.
+    return sorted({"Release", SDK_CONFIGS[config]})
+
+
+def read_stamp():
+    try:
+        lines = SDK_STAMP.read_text().split("\n")
+    except OSError:
+        return None, set()
+    if len(lines) < 3 or lines[1] != "vulkan":
+        return None, set()
+    return lines[0], set(lines[2].split())
+
+
+def fetch_sdk_source(env):
+    if (SDK_SRC / ".git").exists() and output(
+            ["git", "rev-parse", "HEAD"], SDK_SRC, env) == SDK_COMMIT:
+        print(f"source already in {SDK_SRC}")
+        run(["git", "submodule", "update", "--init", "--recursive", "--depth", "1",
+             "--jobs", "8"], SDK_SRC, env)
+        return
+    remove_tree(SDK_SRC)
+    print("downloading the SDK source with its submodules (about 700 MB)")
+    run(["git", "clone", "--quiet", "--branch", SDK_TAG, "--depth", "1",
+         "--recurse-submodules", "--shallow-submodules", "--jobs", "8", SDK_REPO,
+         str(SDK_SRC)], ROOT, env)
+    head = output(["git", "rev-parse", "HEAD"], SDK_SRC, env)
+    if head != SDK_COMMIT:
+        raise SetupError(f"{SDK_TAG} of {SDK_REPO} is {head}, expected {SDK_COMMIT}")
+
+
+def copy_symlink_targets(env):
+    """Git for Windows checks symlinks out as small text files holding the
+    target path unless symlinks are enabled; the SDK build compiles some of
+    them (libmspack's cabextract/mspack/*.c), so put the target files there."""
+    repos = [SDK_SRC] + [
+        SDK_SRC / line for line in output(
+            ["git", "submodule", "foreach", "--quiet", "--recursive",
+             "echo $displaypath"], SDK_SRC, env).splitlines() if line]
+    copied = 0
+    for repo in repos:
+        for line in output(["git", "ls-files", "-s"], repo, env).splitlines():
+            meta, name = line.split("\t", 1)
+            mode, blob = meta.split()[:2]
+            link = repo / name
+            if mode != "120000" or link.is_symlink():
+                continue
+            target = (link.parent / output(["git", "cat-file", "-p", blob], repo,
+                                           env)).resolve()
+            if target.is_file():
+                shutil.copyfile(target, link)
+                copied += 1
+    if copied:
+        print(f"replaced {copied} symlink placeholders with their target files")
+
+
+def forget_sdk_registration():
+    """The SDK's install step adds its prefix to the CMake user package
+    registry (value name = MD5 of the lower-cased prefix). The presets point
+    CMake at the SDK directly, so take that entry out again."""
+    name = hashlib.md5(SDK_PREFIX.as_posix().lower().encode()).hexdigest()
+    subprocess.run(["reg", "delete", r"HKCU\Software\Kitware\CMake\Packages\rexglue",
+                    "/v", name, "/f"], capture_output=True)
+
+
+def build_sdk(env, config):
+    wanted = sdk_configs(config)
+    step(f"ReXGlue SDK {SDK_VERSION} with Direct3D 12 and Vulkan "
+         f"({', '.join(wanted)})")
+    commit, built = read_stamp()
+    if commit == SDK_COMMIT and set(wanted) <= built:
+        print(f"already built in {SDK_PREFIX}")
+        return
+    if commit != SDK_COMMIT:
+        # Older setups unpacked the SDK's Direct3D-12-only package here.
+        for old in (SDK_PREFIX, SDK_ROOT / "_archive"):
+            if old.exists():
+                print(f"removing {old}")
+                remove_tree(old)
+        built = set()
+    fetch_sdk_source(env)
+    copy_symlink_targets(env)
+    print("configuring and building the SDK; this takes several minutes")
+    run(["cmake", "--preset", "win-amd64", "-DREXGLUE_USE_VULKAN=ON",
+         f"-DCMAKE_INSTALL_PREFIX={SDK_PREFIX.as_posix()}"], SDK_SRC, env)
+    for sdk_config in wanted:
+        if sdk_config not in built:
+            run(["cmake", "--build", "out/build/win-amd64", "--config", sdk_config,
+                 "--target", "install", "--parallel", str(os.cpu_count() or 4)],
+                SDK_SRC, env)
+            built.add(sdk_config)
+    forget_sdk_registration()
+    if not (SDK_PREFIX / "bin" / "rexglue.exe").is_file():
+        raise SetupError(f"SDK build finished but rexglue.exe is missing in {SDK_PREFIX}")
+    SDK_STAMP.write_text(f"{SDK_COMMIT}\nvulkan\n{' '.join(sorted(built))}\n")
+    # The intermediate files are most of the 2 GB; the source stays for the
+    # next run.
+    remove_tree(SDK_SRC / "out")
 
 
 # --- 4. build -------------------------------------------------------------
@@ -256,9 +358,7 @@ def build(env, config):
                   "--target", "fracture_codegen"],
                  ["cmake", "--preset", preset],
                  ["cmake", "--build", "--preset", preset]):
-        cmake = shutil.which(args[0], path=env["Path"])
-        if subprocess.run([cmake] + args[1:], cwd=ROOT, env=env).returncode:
-            raise SetupError(f"'{' '.join(args)}' failed")
+        run(args, ROOT, env)
     exe = ROOT / "out" / "build" / preset / "fracture.exe"
     if not exe.is_file():
         raise SetupError(f"build finished but {exe} is missing")
@@ -290,8 +390,8 @@ def main():
     iso = find_iso(args.iso)
     entries = check_iso(iso, args.force)
     extract_game(iso, entries)
-    fetch_sdk()
     env = find_toolchain()
+    build_sdk(env, args.config)
     exe = build(env, args.config)
     write_config(exe)
     step("Done")

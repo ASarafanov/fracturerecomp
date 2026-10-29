@@ -2,6 +2,7 @@
 
 #include "fracture_settings_dialog.h"
 
+#include "fracture_graphics.h"
 #include "fracture_menu_input.h"
 #include "fracture_settings.h"
 
@@ -19,44 +20,10 @@
 
 #if defined(_WIN32)
 #include <windows.h>
-#include <dxgi.h>
 #endif
 
 namespace fracture::settings {
 namespace {
-
-// Hardware adapters as (index, name), indexed like the d3d12_adapter cvar:
-// the position in IDXGIFactory1::EnumAdapters1 order, software ones skipped.
-// On hybrid systems DXGI can list one GPU twice (different LUIDs, only the
-// first with the displays attached); only the first of each name and memory
-// size is kept, which is also the one automatic selection picks.
-std::vector<std::pair<int, std::string>> GraphicsAdapters() {
-  std::vector<std::pair<int, std::string>> adapters;
-#if defined(_WIN32)
-  IDXGIFactory1* factory = nullptr;
-  if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
-    return adapters;
-  }
-  std::vector<std::pair<std::string, SIZE_T>> seen;
-  IDXGIAdapter1* adapter = nullptr;
-  for (UINT i = 0; factory->EnumAdapters1(i, &adapter) == S_OK; ++i) {
-    DXGI_ADAPTER_DESC1 desc{};
-    if (SUCCEEDED(adapter->GetDesc1(&desc)) && !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
-      char name[256] = {};
-      WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr,
-                          nullptr);
-      std::pair<std::string, SIZE_T> key{name, desc.DedicatedVideoMemory};
-      if (std::find(seen.begin(), seen.end(), key) == seen.end()) {
-        seen.push_back(key);
-        adapters.emplace_back(int(i), name);
-      }
-    }
-    adapter->Release();
-  }
-  factory->Release();
-#endif
-  return adapters;
-}
 
 // Sizes the faces are baked at; text is drawn at layout size times the screen
 // scale, so bake for about 1440p to stay sharp there and above.
@@ -335,11 +302,15 @@ void SettingsDialog::BuildCategories() {
                                 "Show the 16:9 picture with black bars instead of stretching "
                                 "it to the window shape.",
                                 "present_letterbox", {{"Off", "false"}, {"On", "true"}}));
+  // Rows below that name a backend's own cvar follow the API in use; a
+  // different API chosen here takes over after the restart.
+  const bool vulkan = graphics::ActiveApi() == "vulkan";
   display.rows.push_back(choice("Allow Tearing",
                                 "Show each frame as soon as it is ready instead of waiting for "
                                 "the display refresh. Lower latency; needed for G-Sync and "
                                 "FreeSync.",
-                                "d3d12_allow_variable_refresh_rate_and_tearing",
+                                vulkan ? "vulkan_allow_present_mode_immediate"
+                                       : "d3d12_allow_variable_refresh_rate_and_tearing",
                                 {{"Off", "false"}, {"On", "true"}}));
 
   Category graphics{"Graphics", "Frame rate, rendering resolution and image quality."};
@@ -350,15 +321,30 @@ void SettingsDialog::BuildCategories() {
                                  "fast, go back to 30.",
                                  "fracture_frame_rate",
                                  {{"30 (Original)", "original"}, {"60 (Experimental)", "60"}}));
-  if (const auto adapters = GraphicsAdapters(); !adapters.empty()) {
+  // Only on plugins built with Vulkan; the prebuilt SDK's is Direct3D 12 only.
+  if (graphics::PluginHasVulkan()) {
+    graphics.rows.push_back(choice("Graphics API",
+                                   "Direct3D 12 or Vulkan. Automatic uses Vulkan under Proton "
+                                   "or Wine (Steam Deck, Linux) and Direct3D 12 on Windows. "
+                                   "Without a Vulkan driver or GPU the game starts with "
+                                   "Direct3D 12.",
+                                   "fracture_graphics_api",
+                                   {{"Automatic", "auto"},
+                                    {"Direct3D 12", "d3d12"},
+                                    {"Vulkan", "vulkan"}}));
+  }
+  if (const auto gpus = vulkan ? graphics::VulkanDevices() : graphics::D3D12Adapters();
+      !gpus.empty()) {
     std::vector<std::pair<std::string, std::string>> options = {{"Automatic", "-1"}};
-    for (const auto& [index, name] : adapters) {
-      options.emplace_back(name, std::to_string(index));
+    for (const auto& gpu : gpus) {
+      options.emplace_back(gpu.name, std::to_string(gpu.index));
     }
-    graphics.rows.push_back(choice("Graphics Card",
-                                   "The GPU the game renders on. Automatic picks the first one "
-                                   "Windows lists, and follows a GPU change.",
-                                   "d3d12_adapter", std::move(options)));
+    graphics.rows.push_back(
+        choice("Graphics Card",
+               vulkan ? "The GPU the game renders on. Automatic picks the most capable one."
+                      : "The GPU the game renders on. Automatic picks the first one Windows "
+                        "lists, and follows a GPU change.",
+               vulkan ? "vulkan_device" : "d3d12_adapter", std::move(options)));
   }
   {
     Row row{"Internal Resolution",
@@ -388,13 +374,26 @@ void SettingsDialog::BuildCategories() {
                                   {"4x", "3"},
                                   {"8x", "4"},
                                   {"16x", "5"}}));
-  graphics.rows.push_back(choice("Render Path",
-                                 "How the Xbox 360's EDRAM render targets are emulated. Fast "
-                                 "uses the GPU's own render targets. Accurate emulates them in "
-                                 "pixel shaders: it fixes some blending and format errors and is "
-                                 "much slower. Automatic picks Fast (Accurate on Intel GPUs).",
-                                 "render_target_path_d3d12",
-                                 {{"Automatic", ""}, {"Fast (RTV)", "rtv"}, {"Accurate (ROV)", "rov"}}));
+  if (vulkan) {
+    graphics.rows.push_back(choice("Render Path",
+                                   "How the Xbox 360's EDRAM render targets are emulated. Fast "
+                                   "uses the GPU's own render targets. Accurate emulates them "
+                                   "in fragment shaders (needs fragment shader interlock): it "
+                                   "fixes some blending and format errors and is much slower.",
+                                   "render_target_path_vulkan",
+                                   {{"Fast (FBO)", ""}, {"Accurate (FSI)", "fsi"}}));
+  } else {
+    graphics.rows.push_back(choice("Render Path",
+                                   "How the Xbox 360's EDRAM render targets are emulated. Fast "
+                                   "uses the GPU's own render targets. Accurate emulates them "
+                                   "in pixel shaders: it fixes some blending and format errors "
+                                   "and is much slower. Automatic picks Fast (Accurate on Intel "
+                                   "GPUs).",
+                                   "render_target_path_d3d12",
+                                   {{"Automatic", ""},
+                                    {"Fast (RTV)", "rtv"},
+                                    {"Accurate (ROV)", "rov"}}));
+  }
 
   Category controls{"Controls", "Controllers, keyboard and mouse."};
   {
