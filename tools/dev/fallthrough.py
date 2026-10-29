@@ -1,7 +1,10 @@
 """Find generated functions that keep going past a call to a no-return
 function (e.g. the C++ rethrow helper) into the EH data words that follow it.
 
-usage: python tools/dev/fallthrough.py <generated/default dir> <noreturn addr hex>
+usage: python tools/dev/fallthrough.py <generated/<release> dir> <noreturn addr hex>
+
+The C++ rethrow helper _CxxThrowException is 0x8224AC00 in default.xex
+version 1 and 0x8224A3F0 in version 2.
 """
 import glob
 import os

@@ -3,8 +3,9 @@
 // The first start (no game files found) shows the install wizard
 // (fracture_installer_dialog.h); this is the part without UI: the disc
 // reader (XDVDFS, as tools/xdvdfs.py), the check that the disc carries
-// exactly the default.xex this build was recompiled from, and the
-// extraction. Nothing here touches the UI; Extract runs on a worker thread.
+// exactly one of the default.xex files this program was recompiled from,
+// and the extraction. Nothing here touches the UI; Extract runs on a worker
+// thread.
 
 #pragma once
 
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,10 +22,32 @@
 
 namespace fracture::installer {
 
-// The recompiled code was made from this exact executable.
 inline constexpr uint32_t kTitleId = 0x4C4107D4;
-inline constexpr std::string_view kXexSha256 =
-    "13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2";
+
+// A release of Fracture whose default.xex has recompiled code in this
+// program. Each release's code is a DLL of its own next to fracture.exe
+// (fracture_<variant>.dll); the game files of the two releases differ too,
+// so they never mix.
+struct Release {
+  std::string_view variant;  // "v1", "v2": the DLL, codegen output, configs
+  uint32_t media_id;         // from the XEX execution info header
+  std::string_view xex_sha256;
+  std::string_view name;     // for messages and logs
+};
+
+inline constexpr Release kReleases[] = {
+    {"v1", 0x20E2A1F5, "13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2",
+     "default.xex version 1"},
+    {"v2", 0x43445F92, "6e1f8972281e02175617eb94bb9bde8baea1a1f767768dbfb0b4bed11b7bafee",
+     "default.xex version 2 (USA, Europe, 7 languages)"},
+};
+
+const Release* FindRelease(std::string_view variant);
+
+// The releases whose recompiled code this program carries (a source build
+// only has the release it was built from). Set once at startup.
+void SetAvailableReleases(std::span<const Release* const> releases);
+bool IsAvailable(const Release& release);
 
 struct DiscFile {
   std::string path;     // as on the disc, '/' separated: "resources/x.big"
@@ -33,6 +57,7 @@ struct DiscFile {
 
 struct Disc {
   std::filesystem::path image;
+  const Release* release = nullptr;
   std::vector<DiscFile> files;  // in disc order, default.xex last
   uint64_t total_bytes = 0;
 };
@@ -41,12 +66,17 @@ struct Disc {
 // SHA-256). Returns "" and fills `disc`, or a message for the player.
 std::string CheckDisc(const std::filesystem::path& image, Disc& disc);
 
-// The same check for game files that are already extracted.
-std::string CheckGameFolder(const std::filesystem::path& dir);
+// The same check for game files that are already extracted; `release` gets
+// the release they are.
+std::string CheckGameFolder(const std::filesystem::path& dir, const Release** release = nullptr);
 
 // True when `dir` holds default.xex. It is written last, so an interrupted
 // install never counts.
 bool HasGameData(const std::filesystem::path& dir);
+
+// The release of the game files in `dir`, from default.xex's header (title
+// and media ID; no hash, this runs on every start), or nullptr.
+const Release* InstalledRelease(const std::filesystem::path& dir);
 
 // Where the files go when the player picks `folder`: the folder itself when
 // it is missing, empty or holds (part of) an install of this game, otherwise
@@ -72,8 +102,11 @@ struct Progress {
 enum class Result { kDone, kCancelled, kFailed };
 
 // Extracts `disc` into `target`. Every file is written as <name>.part and
-// renamed once complete; files already there with the right size are kept,
-// so a second run resumes an interrupted one. On cancel or failure it
+// renamed once complete. When `target` holds an unfinished install of the
+// same release, files already there with the right size are kept, so a
+// second run resumes it; otherwise whatever lies at the disc's paths is
+// removed first (the releases have files of equal size and different
+// content, so nothing is kept across releases). On cancel or failure it
 // removes the files this run wrote. `error` gets a message on kFailed.
 Result Extract(const Disc& disc, const std::filesystem::path& target, Progress& progress,
                std::string& error);

@@ -1,0 +1,70 @@
+# Function boundary overrides for Fracture default.xex version 2.
+# The same cases as config/fracture_functions.toml (version 1), at this
+# release's addresses; tools/dev/map_functions.py pairs them with version 1.
+
+[functions]
+
+# Small virtual methods reached only through vtables and through
+# this-adjusting thunks ("addi r3/r4,-N; b target"). They sit between two
+# discovered functions, often right after a "bctr" virtual-call stub, so the
+# analyzer never marks them as code. Each one ends where the next discovered
+# function starts.
+"0x82349108" = { end = 0x82349118 }
+"0x8236EA98" = { end = 0x8236EAA8 }
+"0x825CCE00" = { end = 0x825CCE10 }
+"0x825EE5C0" = { end = 0x825EE5C8 }
+"0x825F0320" = { end = 0x825F0330 }
+"0x825F71E8" = { end = 0x825F71F0 }
+"0x826E6D48" = { end = 0x826E6D78 }
+"0x826F39A0" = { end = 0x826F39A8 }
+"0x827B15D0" = { end = 0x827B15D8 }
+"0x82B60838" = { end = 0x82B60848 }
+"0x82BD29C8" = { end = 0x82BD29D8 }
+"0x82CBF010" = { end = 0x82CBF020 }
+"0x82E572B8" = { end = 0x82E572C8 }
+"0x82EF6448" = { end = 0x82EF6458 }
+"0x82F7F670" = { end = 0x82F7F680 }
+"0x8300ACF8" = { end = 0x8300AD08 }
+"0x830779D0" = { end = 0x830779E0 }
+
+# Reached only through function pointers (version 1: 0x82C695F0, found by
+# the runtime's "call to invalid or unregistered function" check).
+"0x82C6A3F0" = { end = 0x82C6A400 }
+
+# Tail call from sub_82AE50B8 (version 1: 0x82ACA730 from sub_82AE42A8).
+"0x82ACB530" = { end = 0x82ACB538 }
+
+# A function the analyzer had cut into pieces (version 1: 0x8263A850).
+# Referenced only from vtables; 0x82639FFC and 0x8263A004 are labels inside
+# it, and it runs to its only blr at 0x8263A014.
+"0x82639F98" = { end = 0x8263A018 }
+# 0x82DFEA20 (QueryInterface-style, version 1: 0x82DFDD68) shares its tail
+# at 0x82DFEA38 with 0x82DFEA44, which jumps there. Functions cannot overlap,
+# so the tail stays a function of its own for that jump, codegen gets
+# 0x82DFEA20 up to the tail, and src/game/v2_hooks.cpp replaces it with the
+# whole function.
+"0x82DFEA20" = { end = 0x82DFEA38 }
+"0x82DFEA38" = { end = 0x82DFEA44 }
+
+# Functions whose last instruction is "bl 0x8224A3F0" (_CxxThrowException,
+# version 1: 0x8224AC00; r3 = r4 = 0 is a rethrow). That call never returns,
+# but the analyzer assumes it does and runs on into the 8 bytes of EH data
+# that follow (handler pointer 0x8224A658 decodes as "lwz r17,-22952(r4)")
+# and the catch funclet after it. Each function ends right after the call
+# (tools/dev/fallthrough.py generated/v2 8224a3f0).
+"0x8271D8A4" = { end = 0x8271D8D0 }
+"0x827214D8" = { end = 0x82721530 }
+"0x82725A7C" = { end = 0x82725AE4 }
+"0x8272AA24" = { end = 0x8272AAA0 }
+"0x8272AEA8" = { end = 0x8272AF00 }
+"0x8272B2D0" = { end = 0x8272B34C }
+"0x82733C78" = { end = 0x82733CD0 }
+"0x82738824" = { end = 0x827388A0 }
+"0x8273DF28" = { end = 0x8273DFA4 }
+"0x82740640" = { end = 0x82740698 }
+"0x82740A5C" = { end = 0x82740AB4 }
+"0x827438E4" = { end = 0x8274394C }
+"0x82744AA4" = { end = 0x82744B20 }
+"0x8274729C" = { end = 0x82747304 }
+"0x82748910" = { end = 0x8274898C }
+"0x8274C458" = { end = 0x8274C4D8 }

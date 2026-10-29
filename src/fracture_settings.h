@@ -35,9 +35,11 @@ bool Save(const std::vector<std::pair<std::string, std::string>>& changes);
 bool SameValue(std::string_view name, std::string_view a, std::string_view b);
 
 // Starts another fracture.exe with this process's command line plus
-// --fracture_restart_wait_pid, so it waits for this one to exit first.
-// The caller then closes the window. Returns false if nothing was started.
-bool StartRestartedProcess();
+// --fracture_restart_wait_pid, so it waits for this one to exit first, and
+// --fracture_game_release=`game_release` when that is not empty (the other
+// release's game files were found). The caller then closes the window.
+// Returns false if nothing was started.
+bool StartRestartedProcess(std::string_view game_release = {});
 
 // In a process started by StartRestartedProcess: waits (bounded) until the
 // previous one has exited, so the two never share the log files, the shader

@@ -1,10 +1,14 @@
 # Retail game data: never commit (supply your own legally obtained copy).
 *.iso
-game/
+/game/
+/game-v2/
+# default.xex of each supported release, the codegen input.
+/xex/
 
 # Codegen output is derived from the retail XEX; regenerate it at build time.
-generated/*
-!generated/rexglue.cmake
+# (codegen also rewrites generated/rexglue.cmake on every run; the build uses
+# cmake/fracture_recomp.cmake instead.)
+/generated/
 
 # Prebuilt ReXGlue SDK (downloaded from the GitHub release).
 third_party/rexglue-sdk/

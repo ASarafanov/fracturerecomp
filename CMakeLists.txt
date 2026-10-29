@@ -1,6 +1,6 @@
 # fracture - ReXGlue Recompiled Project
 #
-# SDK boilerplate lives in generated/rexglue.cmake.
+# SDK and codegen wiring lives in cmake/fracture_recomp.cmake.
 
 cmake_minimum_required(VERSION 3.25)
 project(fracture LANGUAGES CXX)
@@ -8,14 +8,14 @@ project(fracture LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include(generated/rexglue.cmake)
+include(cmake/fracture_recomp.cmake)
 
 # Sources
 set(FRACTURE_SOURCES
     src/main.cpp
     src/fracture_frame_rate.cpp
+    src/fracture_game.cpp
     src/fracture_graphics.cpp
-    src/fracture_hooks.cpp
     src/fracture_installer.cpp
     src/fracture_installer_dialog.cpp
     src/fracture_menu_input.cpp
@@ -29,7 +29,7 @@ else()
     add_executable(fracture ${FRACTURE_SOURCES})
 endif()
 
-rexglue_setup_target(fracture GPU_PLUGINS xenos)
+fracture_setup_target(fracture GPU_PLUGINS xenos)
 
 if(WIN32)
     # dxgi lists the Direct3D 12 adapters for the settings screen; ole32,

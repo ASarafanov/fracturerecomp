@@ -3,12 +3,14 @@
 usage: python tools/package_release.py --version 0.3.0 [--no-build]
 
 Run it on the maintainer's machine after tools/setup.py has set things up
-(codegen needs game/default.xex, so CI cannot do this). It builds the
-win-amd64-release preset, then copies an explicit list of files into
+for both supported releases (codegen needs xex/v1/default.xex and
+xex/v2/default.xex, so CI cannot do this). It builds the win-amd64-release
+preset, then copies an explicit list of files into
 out/release/FractureRecomp/ and zips that folder:
 
-- fracture.exe and the SDK DLLs next to it (checked byte for byte against
-  the SDK's own bin folder);
+- fracture.exe, the game code of each release (fracture_v1.dll,
+  fracture_v2.dll; a package always carries both) and the SDK DLLs next to
+  them (checked byte for byte against the SDK's own bin folder);
 - the VC++ runtime DLLs they import, from the Visual Studio redist folder
   (app-local, so players need no redistributable installer);
 - README.txt for players and licenses/ (SDK and third-party notices).
@@ -33,6 +35,8 @@ ROOT = setup.ROOT
 PRESET = "win-amd64-release"
 BUILD_DIR = ROOT / "out" / "build" / PRESET
 SDK_BIN = setup.SDK_PREFIX / "bin"
+# Built by this project, one per release (src/game/game_api.h).
+GAME_DLLS = ("fracture_v1.dll", "fracture_v2.dll")
 SDK_THIRDPARTY = setup.SDK_SRC / "thirdparty"
 OUT_DIR = ROOT / "out" / "release"
 PACKAGE_NAME = "FractureRecomp"
@@ -164,10 +168,20 @@ def collect_binaries(env):
     if not exe.is_file():
         raise PackageError(f"{exe} is missing; build first (or drop --no-build)")
     files = {"fracture.exe": exe}
+    # Loaded at runtime by fracture.exe, so not in its import table either.
+    for name in GAME_DLLS:
+        dll = BUILD_DIR / name
+        if not dll.is_file():
+            raise PackageError(
+                f"{dll} is missing; a release needs the game code of both releases "
+                "(xex/v1/default.xex and xex/v2/default.xex)")
+        files[name] = dll
     # The build copies the SDK DLLs next to the exe (the GPU plugin is loaded
     # at runtime, so it is not in any import table). Only ship them when they
     # are exactly the SDK's own files.
     for dll in sorted(BUILD_DIR.glob("*.dll")):
+        if dll.name in GAME_DLLS:
+            continue
         sdk_dll = SDK_BIN / dll.name
         if not sdk_dll.is_file() or sha256(sdk_dll) != sha256(dll):
             raise PackageError(f"{dll.name} in the build folder is not the SDK's file")
@@ -206,7 +220,10 @@ made by static recompilation with the ReXGlue SDK. Source and help:
 {REPO_URL}
 
 This archive contains the program, not the game. You need your own Xbox 360
-disc image (.iso) of Fracture: title ID 4C4107D4, the original release.
+disc image (.iso) of Fracture (title ID 4C4107D4). Two releases work: the
+one with default.xex version 1 and the multi-language USA / Europe disc
+(version 2). The program checks the disc and uses the matching game code,
+fracture_v1.dll or fracture_v2.dll.
 
 Requirements
 ------------
@@ -261,7 +278,8 @@ def third_party_notes():
         "Third-party software in this program",
         "====================================",
         "",
-        "fracture.exe, rexruntime.dll and rexgpu-xenos.dll are built with the",
+        "fracture.exe, fracture_v1.dll, fracture_v2.dll, rexruntime.dll and",
+        "rexgpu-xenos.dll are built with the",
         "ReXGlue SDK 0.10.0 (BSD 3-Clause, licenses/rexglue-sdk), which is",
         "built with the components below (not every one ends up in these",
         "files). Each folder here holds the license files from the",

@@ -9,10 +9,16 @@
 
 #pragma once
 
+#include <rex/ppc/context.h>
+
 #include <cstdint>
 #include <functional>
 
 namespace fracture::menu_input {
+
+// The game's XamInputGetState: the game DLL forwards every call here
+// (src/game/game_api.h). Runs on guest threads.
+void GuestXamInputGetState(PPCContext& ctx, uint8_t* base);
 
 // X_INPUT_GAMEPAD_* button bits.
 inline constexpr uint16_t kDpadUp = 0x0001;

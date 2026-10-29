@@ -188,11 +188,12 @@ Pad LatestPad() {
 
 }  // namespace fracture::menu_input
 
-// Replaces the SDK's XamInputGetState for the game: generated code calls this
-// symbol directly (it is not dllimport), so a definition here wins over the
-// import library. The real one does the work; the result is then filtered.
-// Guest arguments: r3 = user index, r4 = flags, r5 = X_INPUT_STATE*.
-extern "C" REX_FUNC(__imp__XamInputGetState) {
+namespace fracture::menu_input {
+
+// The game DLL's XamInputGetState forwards here (src/game/game_module.cpp).
+// The SDK's one does the work; the result is then filtered. Guest arguments:
+// r3 = user index, r4 = flags, r5 = X_INPUT_STATE*.
+void GuestXamInputGetState(PPCContext& ctx, uint8_t* base) {
   static const auto original = [] {
     const auto function = fracture::menu_input::FindOriginal();
     if (function) {
@@ -215,3 +216,5 @@ extern "C" REX_FUNC(__imp__XamInputGetState) {
   }
   fracture::menu_input::FilterGuestState(user, base + state);
 }
+
+}  // namespace fracture::menu_input

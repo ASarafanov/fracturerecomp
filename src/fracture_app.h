@@ -9,10 +9,12 @@
 #include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
+#include <rex/system.h>
 #include <rex/ui/keybinds.h>
 #include <rex/ui/window.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -23,6 +25,7 @@
 #include <vector>
 
 #include "fracture_frame_rate.h"
+#include "fracture_game.h"
 #include "fracture_graphics.h"
 #include "fracture_installer.h"
 #include "fracture_installer_dialog.h"
@@ -35,7 +38,13 @@ REXCVAR_DECLARE(std::string, fracture_dump_cvars);
 
 class FractureApp : public rex::ReXApp {
  public:
-  using rex::ReXApp::ReXApp;
+  FractureApp(rex::ui::WindowedAppContext& ctx, std::string_view name,
+              const rex::PPCImageInfo& image_info, const fracture::installer::Release& release,
+              bool release_forced)
+      : rex::ReXApp(ctx, name, image_info),
+        image_info_(image_info),
+        release_(release),
+        release_forced_(release_forced) {}
 
   // Debug aid: write the decrypted, decompressed guest image to the file named
   // by --fracture_dump_image before any game code runs. The dump is retail
@@ -45,18 +54,33 @@ class FractureApp : public rex::ReXApp {
     if (path.empty()) {
       return;
     }
-    constexpr uint32_t kImageBase = 0x82000000;
-    constexpr uint32_t kImageEnd = 0x83710000;
     std::ofstream out(path, std::ios::binary);
     out.write(reinterpret_cast<const char*>(runtime()->virtual_membase() +
-                                            kImageBase),
-              kImageEnd - kImageBase);
+                                            image_info_.image_base),
+              image_info_.image_size);
   }
 
+  // The game code is a DLL per release (fracture_game.h). The SDK takes its
+  // image layout in the constructor, so the DLL is picked and loaded here.
   static std::unique_ptr<rex::ui::WindowedApp> Create(
       rex::ui::WindowedAppContext& ctx) {
-    return std::unique_ptr<FractureApp>(new FractureApp(ctx, "fracture",
-        PPCImageConfig));
+    namespace game = fracture::game;
+    const auto available = game::AvailableReleases();
+    fracture::installer::SetAvailableReleases(available);
+    bool forced = false;
+    const auto* release = game::PickRelease(available, forced);
+    std::string error = "The game code (fracture_v1.dll or fracture_v2.dll) is missing next to "
+                        "fracture.exe. Unpack the whole download again.";
+    std::optional<rex::PPCImageInfo> image_info;
+    if (release) {
+      image_info = game::Load(*release, error);
+    }
+    if (!image_info) {
+      REXLOG_ERROR("{}", error);
+      rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, error);
+      std::exit(EXIT_FAILURE);
+    }
+    return std::make_unique<FractureApp>(ctx, "fracture", *image_info, *release, forced);
   }
 
   // Fracture has no native renderer, so default to the emulated Xenos GPU
@@ -82,8 +106,10 @@ class FractureApp : public rex::ReXApp {
   // for an exe in out\build\<preset>\, where setup.py does, the repository
   // root.
   //
-  // With no game files anywhere, show the install wizard and continue once
-  // it is done.
+  // The game files must be the release whose code was loaded at start; for
+  // the other release this process starts the program again with its code.
+  // With no usable game files anywhere, show the install wizard and continue
+  // once it is done.
   std::optional<rex::PathConfig> OnFinalizePaths(
       const rex::PathConfig& defaults,
       std::function<void(rex::PathConfig)> resume) override {
@@ -97,20 +123,26 @@ class FractureApp : public rex::ReXApp {
         paths.game_data_root = exe_dir / paths.game_data_root;
       }
     }
-    if (installer::HasGameData(paths.game_data_root)) {
-      return paths;
-    }
-    std::vector<std::filesystem::path> candidates = {exe_dir / "game"};
-    const auto build_dir = exe_dir.parent_path();
-    if (build_dir.filename() == "build" && build_dir.parent_path().filename() == "out") {
-      candidates.push_back(build_dir.parent_path().parent_path() / "game");
+    std::vector<std::filesystem::path> candidates = {paths.game_data_root};
+    for (const auto& folder : fracture::game::DefaultGameFolders()) {
+      candidates.push_back(folder);
     }
     for (const auto& candidate : candidates) {
-      if (installer::HasGameData(candidate)) {
-        REXLOG_INFO("Game data not found at '{}', using {}",
-                    fracture::PathText(paths.game_data_root), fracture::PathText(candidate));
-        paths.game_data_root = candidate;
-        return paths;
+      if (!installer::HasGameData(candidate)) {
+        continue;
+      }
+      switch (CheckRelease(candidate, /*may_restart=*/!release_forced_)) {
+        case ReleaseCheck::kMatches:
+          if (candidate != paths.game_data_root) {
+            REXLOG_INFO("Game data not found at '{}', using {}",
+                        fracture::PathText(paths.game_data_root), fracture::PathText(candidate));
+            paths.game_data_root = candidate;
+          }
+          return paths;
+        case ReleaseCheck::kRestarting:
+          return std::nullopt;  // the window closes
+        case ReleaseCheck::kUnusable:
+          break;
       }
     }
     if (!imgui_drawer()) {
@@ -139,6 +171,22 @@ class FractureApp : public rex::ReXApp {
         if (!installer_) {
           return;  // Play was pressed twice
         }
+        // The wizard takes either release; the other one's code needs a
+        // fresh start (game_data_root is saved by now).
+        switch (CheckRelease(dir, /*may_restart=*/true)) {
+          case ReleaseCheck::kMatches:
+            break;
+          case ReleaseCheck::kRestarting:
+            installer_.reset();
+            return;
+          case ReleaseCheck::kUnusable:
+            installer_.reset();
+            rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error,
+                                      "The game could not be started. See the log in the logs "
+                                      "folder next to fracture.exe.");
+            CloseWindow();
+            return;
+        }
         installer_.reset();
         if (window()) {
           window()->SetCursorVisibility(cursor_before_installer_);
@@ -150,13 +198,7 @@ class FractureApp : public rex::ReXApp {
         resume(std::move(paths));
       });
     };
-    callbacks.quit = [this] {
-      app_context().CallInUIThreadDeferred([this] {
-        if (window()) {
-          window()->RequestClose();
-        }
-      });
-    };
+    callbacks.quit = [this] { CloseWindow(); };
     installer_ = std::make_unique<installer::InstallerDialog>(imgui_drawer(), window(),
                                                               settings_fonts_, folder,
                                                               std::move(callbacks));
@@ -176,7 +218,11 @@ class FractureApp : public rex::ReXApp {
 
   // fracture.toml has just been applied; settings.toml goes on top of it,
   // before the window and the GPU plugin read their cvars.
-  void OnPostInitLogging() override { fracture::settings::Load(base_config_path_); }
+  void OnPostInitLogging() override {
+    // Create ran before the log file existed.
+    REXLOG_INFO("Game code: fracture_{}.dll, Fracture {}", release_.variant, release_.name);
+    fracture::settings::Load(base_config_path_);
+  }
 
   void OnConfigureFonts(ImFontAtlas* atlas) override {
     settings_fonts_ = fracture::settings::LoadFonts(atlas);
@@ -230,6 +276,49 @@ class FractureApp : public rex::ReXApp {
   // CreateAchievementNotificationDialog() override;
 
  private:
+  enum class ReleaseCheck { kMatches, kRestarting, kUnusable };
+
+  // Whether the game files in `dir` are the release whose code is loaded.
+  // For the other supported release this starts the program again with that
+  // release's code (when `may_restart`) and closes this one.
+  ReleaseCheck CheckRelease(const std::filesystem::path& dir, bool may_restart) {
+    namespace installer = fracture::installer;
+    const installer::Release* installed = installer::InstalledRelease(dir);
+    if (installed == &release_) {
+      return ReleaseCheck::kMatches;
+    }
+    if (!installed) {
+      REXLOG_ERROR("The game files in {} are not a release of Fracture this program supports",
+                   fracture::PathText(dir));
+      return ReleaseCheck::kUnusable;
+    }
+    if (!installer::IsAvailable(*installed)) {
+      REXLOG_ERROR("The game files in {} are Fracture {}, which this program does not include",
+                   fracture::PathText(dir), installed->name);
+      return ReleaseCheck::kUnusable;
+    }
+    if (!may_restart) {
+      REXLOG_ERROR("The game files in {} are Fracture {}, but this start was made for {}",
+                   fracture::PathText(dir), installed->name, release_.name);
+      return ReleaseCheck::kUnusable;
+    }
+    REXLOG_INFO("The game files in {} are Fracture {}: starting again with its code",
+                fracture::PathText(dir), installed->name);
+    if (!fracture::settings::StartRestartedProcess(installed->variant)) {
+      return ReleaseCheck::kUnusable;
+    }
+    CloseWindow();
+    return ReleaseCheck::kRestarting;
+  }
+
+  void CloseWindow() {
+    app_context().CallInUIThreadDeferred([this] {
+      if (window()) {
+        window()->RequestClose();
+      }
+    });
+  }
+
   void OpenSettings() {
     // Not over the install wizard: the game has not started yet.
     if (settings_dialog_ || installer_ || !imgui_drawer()) {
@@ -241,13 +330,7 @@ class FractureApp : public rex::ReXApp {
       app_context().CallInUIThreadDeferred([this] { CloseSettings(); });
     };
     callbacks.restart = [this] { RestartGame(); };
-    callbacks.quit = [this] {
-      app_context().CallInUIThreadDeferred([this] {
-        if (window()) {
-          window()->RequestClose();
-        }
-      });
-    };
+    callbacks.quit = [this] { CloseWindow(); };
     settings_dialog_ = std::make_unique<fracture::settings::SettingsDialog>(
         imgui_drawer(), settings_fonts_, settings_state_, std::move(callbacks));
     REXLOG_DEBUG("Settings: screen opened");
@@ -289,11 +372,7 @@ class FractureApp : public rex::ReXApp {
     if (!fracture::settings::StartRestartedProcess()) {
       return;
     }
-    app_context().CallInUIThreadDeferred([this]() {
-      if (window()) {
-        window()->RequestClose();
-      }
-    });
+    CloseWindow();
   }
 
   // fracture.toml, as the SDK resolved it.
@@ -313,4 +392,10 @@ class FractureApp : public rex::ReXApp {
   std::function<void(rex::PathConfig)> resume_;
   rex::ui::Window::CursorVisibility cursor_before_installer_ =
       rex::ui::Window::CursorVisibility::kVisible;
+
+  // The release whose code was loaded (fracture_<variant>.dll) and the
+  // layout of its image; whether --fracture_game_release chose it.
+  rex::PPCImageInfo image_info_;
+  const fracture::installer::Release& release_;
+  bool release_forced_ = false;
 };

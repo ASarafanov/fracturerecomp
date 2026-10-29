@@ -3,8 +3,6 @@
 #include "fracture_frame_rate.h"
 
 #include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/ppc/context.h>
 
 #include <atomic>
 #include <cstdint>
@@ -16,15 +14,9 @@ REXCVAR_DEFINE_STRING(fracture_frame_rate, "original", "Fracture",
                       "settings screen) lets the game loop run far faster than it presents")
     .allowed({"original", "60", "unlimited"});
 
-REX_EXTERN(__imp__sub_822A4350);
-
 namespace fracture::frame_rate {
 namespace {
 
-// D3D device field holding D3DPRESENT_PARAMETERS::PresentationInterval;
-// sub_822A4350 maps it to a vblank count for the swap (ONE -> 1, TWO -> 2,
-// THREE -> 3, IMMEDIATE -> 0) and queues the frame with it.
-constexpr uint32_t kPresentIntervalOffset = 13596;
 constexpr uint32_t kIntervalOne = 1;
 constexpr uint32_t kIntervalImmediate = 0x80000000;
 
@@ -41,17 +33,6 @@ uint32_t IntervalFor(std::string_view mode) {
   return 0;
 }
 
-uint32_t LoadBE32(const uint8_t* p) {
-  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
-}
-
-void StoreBE32(uint8_t* p, uint32_t value) {
-  p[0] = uint8_t(value >> 24);
-  p[1] = uint8_t(value >> 16);
-  p[2] = uint8_t(value >> 8);
-  p[3] = uint8_t(value);
-}
-
 }  // namespace
 
 void Init() {
@@ -62,20 +43,6 @@ void Init() {
                                     });
 }
 
-}  // namespace fracture::frame_rate
+uint32_t Interval() { return g_interval.load(std::memory_order_relaxed); }
 
-// D3D's swap step that queues the frame for its vblank (r3 = device). The
-// interval is replaced only for this call and restored right after, so the
-// rest of the game keeps reading its own value.
-REX_HOOK_RAW(sub_822A4350) {
-  const uint32_t interval = fracture::frame_rate::g_interval.load(std::memory_order_relaxed);
-  if (interval == 0) {
-    __imp__sub_822A4350(ctx, base);
-    return;
-  }
-  uint8_t* field = base + ctx.r3.u32 + fracture::frame_rate::kPresentIntervalOffset;
-  const uint32_t game_interval = fracture::frame_rate::LoadBE32(field);
-  fracture::frame_rate::StoreBE32(field, interval);
-  __imp__sub_822A4350(ctx, base);
-  fracture::frame_rate::StoreBE32(field, game_interval);
-}
+}  // namespace fracture::frame_rate

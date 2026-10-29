@@ -362,10 +362,23 @@ bool SameValue(std::string_view name, std::string_view a, std::string_view b) {
 
 namespace {
 constexpr std::wstring_view kWaitFlag = L" --fracture_restart_wait_pid=";
+constexpr std::wstring_view kReleaseFlag = L" --fracture_game_release=";
 constexpr DWORD kRestartWaitMs = 20000;
+
+// Removes every `flag`<value> an earlier restart appended (always in exactly
+// this form, the value up to the next space).
+void EraseFlag(std::wstring& command_line, std::wstring_view flag) {
+  for (size_t pos; (pos = command_line.find(flag)) != std::wstring::npos;) {
+    size_t end = pos + flag.size();
+    while (end < command_line.size() && command_line[end] != L' ') {
+      ++end;
+    }
+    command_line.erase(pos, end - pos);
+  }
+}
 }  // namespace
 
-bool StartRestartedProcess() {
+bool StartRestartedProcess(std::string_view game_release) {
   wchar_t exe_path[MAX_PATH] = {};
   const DWORD length = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
   if (length == 0 || length == MAX_PATH) {
@@ -373,15 +386,14 @@ bool StartRestartedProcess() {
     return false;
   }
 
-  // The original command line as typed, minus the wait flag an earlier
-  // restart appended (always last-added in exactly this form).
+  // The original command line as typed, minus the flags an earlier restart
+  // appended.
   std::wstring command_line = GetCommandLineW();
-  for (size_t pos; (pos = command_line.find(kWaitFlag)) != std::wstring::npos;) {
-    size_t end = pos + kWaitFlag.size();
-    while (end < command_line.size() && iswdigit(command_line[end])) {
-      ++end;
-    }
-    command_line.erase(pos, end - pos);
+  EraseFlag(command_line, kWaitFlag);
+  if (!game_release.empty()) {
+    EraseFlag(command_line, kReleaseFlag);
+    command_line += kReleaseFlag;
+    command_line.append(game_release.begin(), game_release.end());
   }
   command_line += kWaitFlag;
   command_line += std::to_wstring(GetCurrentProcessId());
@@ -420,7 +432,8 @@ void WaitForPreviousProcess() {
 
 #else
 
-bool StartRestartedProcess() {
+bool StartRestartedProcess(std::string_view game_release) {
+  (void)game_release;
   REXLOG_ERROR("Restart: not implemented on this platform");
   return false;
 }

@@ -1,0 +1,16 @@
+# Fracture default.xex version 2 (media ID 43445F92, the multi-language
+# "USA, Europe" disc). Version 1 is fracture_manifest.toml.
+
+[project]
+name = "fracture"
+sdk_version = "0.10.0"
+game_root = "xex/v2"
+
+[entrypoint]
+file_path = "xex/v2/default.xex"
+out_directory_path = "generated/v2"
+includes = [
+  "config/v2/fracture_functions.toml",
+  "config/v2/fracture_data_refs.toml",
+  "config/v2/fracture_code_refs.toml",
+]

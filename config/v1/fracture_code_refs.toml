@@ -3,7 +3,7 @@
 # functions such as vcall thunks) and that nothing calls directly, so the
 # analyzer does not discover them.
 #
-# Generated: tools/dev/scan_refs.py --code <image dump> generated/default,
+# Generated: tools/dev/scan_refs.py --code <image dump> generated/v1,
 # then tools/dev/prune_splits.py with each codegen log until codegen is clean:
 # it removes hits that cut another function in two and adds functions that a
 # scanned thunk tail-calls. Entries are start-only; the analyzer sizes each

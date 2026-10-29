@@ -131,33 +131,73 @@ std::string Sha256Hex(const std::vector<uint8_t>& data) {
   return hex;
 }
 
-// Title ID from the XEX2 execution info header, or 0.
-uint32_t XexTitleId(const std::vector<uint8_t>& data) {
+std::vector<const Release*> g_available;
+
+struct XexIds {
+  uint32_t title_id = 0;
+  uint32_t media_id = 0;
+};
+
+// Title and media ID from the XEX2 execution info header; zero when `data`
+// (the start of default.xex is enough) is no XEX2.
+XexIds ReadXexIds(const std::vector<uint8_t>& data) {
   if (data.size() < 24 || std::string_view(reinterpret_cast<const char*>(data.data()), 4) != "XEX2") {
-    return 0;
+    return {};
   }
   const uint32_t count = Be32(data.data() + 20);
   for (uint64_t i = 0; i < count && 24 + i * 8 + 8 <= data.size(); ++i) {
     const uint8_t* header = data.data() + 24 + i * 8;
     if (Be32(header) == 0x00040006) {
       const uint64_t value = Be32(header + 4);
-      return value + 16 <= data.size() ? Be32(data.data() + value + 12) : 0;
+      if (value + 16 > data.size()) {
+        return {};
+      }
+      return {Be32(data.data() + value + 12), Be32(data.data() + value)};
     }
   }
-  return 0;
+  return {};
 }
 
-std::string CheckXex(const std::vector<uint8_t>& data) {
-  const uint32_t title_id = XexTitleId(data);
-  if (title_id != kTitleId) {
-    return title_id ? fmt::format("This is not Fracture (title ID {:08X}).", title_id)
-                    : std::string("default.xex is not an Xbox 360 executable.");
+// Checks a whole default.xex. Returns "" and sets `release`, or a message.
+std::string CheckXex(const std::vector<uint8_t>& data, const Release*& release) {
+  release = nullptr;
+  const XexIds ids = ReadXexIds(data);
+  if (ids.title_id != kTitleId) {
+    return ids.title_id ? fmt::format("This is not Fracture (title ID {:08X}).", ids.title_id)
+                        : std::string("default.xex is not an Xbox 360 executable.");
   }
-  if (Sha256Hex(data) != kXexSha256) {
-    return "This is a different release of Fracture than the one this build was made from "
-           "(default.xex differs), so the game would not run.";
+  const std::string hash = Sha256Hex(data);
+  for (const Release& candidate : kReleases) {
+    if (hash != candidate.xex_sha256) {
+      continue;
+    }
+    if (!IsAvailable(candidate)) {
+      return fmt::format("This is Fracture {}, but this copy of the program was built for "
+                         "another release and does not include it.",
+                         candidate.name);
+    }
+    release = &candidate;
+    return {};
   }
-  return {};
+  return fmt::format("This is a release of Fracture this program was not made from (media ID "
+                     "{:08X}, default.xex differs), so the game would not run.",
+                     ids.media_id);
+}
+
+// The release named in an unfinished install's marker. Markers without one
+// were written by v0.3.0, which only installed version 1.
+std::string MarkerRelease(const std::filesystem::path& dir) {
+  std::ifstream marker(dir / kMarker);
+  std::string line;
+  while (std::getline(marker, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    if (line.starts_with("release=")) {
+      return line.substr(8);
+    }
+  }
+  return "v1";
 }
 
 // A file name from the disc that is safe to create: printable ASCII, no
@@ -280,6 +320,23 @@ std::string ReadWholeFile(const std::filesystem::path& path, std::vector<uint8_t
 
 }  // namespace
 
+const Release* FindRelease(std::string_view variant) {
+  for (const Release& release : kReleases) {
+    if (release.variant == variant) {
+      return &release;
+    }
+  }
+  return nullptr;
+}
+
+void SetAvailableReleases(std::span<const Release* const> releases) {
+  g_available.assign(releases.begin(), releases.end());
+}
+
+bool IsAvailable(const Release& release) {
+  return std::find(g_available.begin(), g_available.end(), &release) != g_available.end();
+}
+
 std::string SizeText(uint64_t bytes) {
   // Binary units, as Explorer shows drive space.
   if (bytes >= (1ull << 30)) {
@@ -316,11 +373,13 @@ std::string CheckDisc(const std::filesystem::path& image, Disc& disc) {
   if (!ReadAt(in, xex->offset, data.data(), data.size())) {
     return "The disc image could not be read.";
   }
-  if (std::string error = CheckXex(data); !error.empty()) {
+  const Release* release = nullptr;
+  if (std::string error = CheckXex(data, release); !error.empty()) {
     return error;
   }
 
   disc.image = image;
+  disc.release = release;
   const DiscFile xex_file = *xex;
   for (DiscFile& file : all) {
     if (Lower(file.path).starts_with(kSkippedDir) || Lower(file.path) == "default.xex") {
@@ -335,12 +394,12 @@ std::string CheckDisc(const std::filesystem::path& image, Disc& disc) {
             [](const DiscFile& a, const DiscFile& b) { return a.offset < b.offset; });
   disc.files.push_back(xex_file);
   disc.total_bytes += xex_file.size;
-  REXLOG_INFO("Installer: {} is Fracture ({} files, {})", PathText(image), disc.files.size(),
-              SizeText(disc.total_bytes));
+  REXLOG_INFO("Installer: {} is Fracture {} ({} files, {})", PathText(image), release->name,
+              disc.files.size(), SizeText(disc.total_bytes));
   return {};
 }
 
-std::string CheckGameFolder(const std::filesystem::path& dir) {
+std::string CheckGameFolder(const std::filesystem::path& dir, const Release** release) {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(dir / "default.xex", ec)) {
     return "This folder has no default.xex. Choose the folder that contains default.xex and "
@@ -353,12 +412,37 @@ std::string CheckGameFolder(const std::filesystem::path& dir) {
   if (std::string error = ReadWholeFile(dir / "default.xex", data); !error.empty()) {
     return error;
   }
-  return CheckXex(data);
+  const Release* found = nullptr;
+  std::string error = CheckXex(data, found);
+  if (release) {
+    *release = found;
+  }
+  return error;
 }
 
 bool HasGameData(const std::filesystem::path& dir) {
   std::error_code ec;
   return !dir.empty() && std::filesystem::is_regular_file(dir / "default.xex", ec);
+}
+
+const Release* InstalledRelease(const std::filesystem::path& dir) {
+  if (!HasGameData(dir)) {
+    return nullptr;
+  }
+  std::ifstream in(dir / "default.xex", std::ios::binary);
+  std::vector<uint8_t> header(64u << 10);
+  in.read(reinterpret_cast<char*>(header.data()), std::streamsize(header.size()));
+  header.resize(size_t(std::max<std::streamsize>(in.gcount(), 0)));
+  const XexIds ids = ReadXexIds(header);
+  if (ids.title_id != kTitleId) {
+    return nullptr;
+  }
+  for (const Release& release : kReleases) {
+    if (release.media_id == ids.media_id) {
+      return &release;
+    }
+  }
+  return nullptr;
 }
 
 bool IsUnfinishedInstall(const std::filesystem::path& dir) {
@@ -468,13 +552,34 @@ Result Extract(const Disc& disc, const std::filesystem::path& target, Progress& 
     REXLOG_ERROR("Installer: {}", error);
     return Result::kFailed;
   }
-  {
+  auto write_marker = [&](std::string_view release) {
     std::ofstream marker(target / kMarker, std::ios::binary | std::ios::trunc);
-    if (!marker) {
+    marker << "Fracture install in progress. Start fracture.exe to finish it.\n"
+           << "disc=" << PathText(disc.image) << "\n"
+           << "release=" << release << "\n";
+    return bool(marker);
+  };
+  // Only an unfinished install of the same release is resumed: the two
+  // releases have files of equal size and different content. Otherwise
+  // whatever lies at this disc's paths goes first, under a marker naming no
+  // release, so an interruption here cannot leave another release's files
+  // to be taken for this one's.
+  const bool resume = IsUnfinishedInstall(target) && disc.release &&
+                      MarkerRelease(target) == disc.release->variant;
+  if (!resume) {
+    if (!write_marker("")) {
       return fail(fmt::format("Could not write to {}. Choose another folder.", PathText(target)));
     }
-    marker << "Fracture install in progress. Start fracture.exe to finish it.\n"
-           << "disc=" << PathText(disc.image) << "\n";
+    for (const DiscFile& file : disc.files) {
+      const fs::path destination = target / PathFromText(file.path);
+      fs::path part = destination;
+      part += ".part";
+      fs::remove(destination, ec);
+      fs::remove(part, ec);
+    }
+  }
+  if (!write_marker(disc.release ? disc.release->variant : std::string_view())) {
+    return fail(fmt::format("Could not write to {}. Choose another folder.", PathText(target)));
   }
   std::ifstream in(disc.image, std::ios::binary);
   if (!in) {
@@ -490,7 +595,8 @@ Result Extract(const Disc& disc, const std::filesystem::path& target, Progress& 
       return Result::kCancelled;
     }
     const fs::path destination = target / PathFromText(file.path);
-    if (fs::is_regular_file(destination, ec) && fs::file_size(destination, ec) == file.size) {
+    if (resume && fs::is_regular_file(destination, ec) &&
+        fs::file_size(destination, ec) == file.size) {
       progress.done_bytes += file.size;
       ++progress.done_files;
       continue;

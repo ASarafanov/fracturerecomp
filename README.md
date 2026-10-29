@@ -28,10 +28,14 @@ the program copies the game files from your disc image on its first start.
 - Windows 10 (version 1903 or later) or 11, x64, or a Steam Deck / Linux with
   Proton (not tested yet)
 - A graphics card with Direct3D 12 or Vulkan
-- A disc image (`.iso`) of the Xbox 360 release of Fracture. The supported
-  executable is title ID `4C4107D4`, `default.xex` SHA-256
-  `13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2`; other
-  releases are refused, because the recompiled code is made from that file.
+- A disc image (`.iso`) of the Xbox 360 release of Fracture (title ID
+  `4C4107D4`). Two releases are supported; the recompiled code is made from
+  their exact `default.xex`, so others are refused:
+
+  | Release | Media ID | `default.xex` SHA-256 |
+  | --- | --- | --- |
+  | Version 1 | `20E2A1F5` | `13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2` |
+  | Version 2, USA / Europe, 7 languages | `43445F92` | `6e1f8972281e02175617eb94bb9bde8baea1a1f767768dbfb0b4bed11b7bafee` |
 - About 4 GB of free disk space for the game files
 
 Nothing else: no Visual Studio, no Python, no runtime installers. The archive
@@ -67,6 +71,7 @@ controller (D-pad, A).
 | Where | What |
 | --- | --- |
 | `game\` (or the folder you chose) | The game files from your disc |
+| `fracture_v1.dll`, `fracture_v2.dll` | The recompiled game, one per supported release; `fracture.exe` loads the one that matches your game files (after installing the other release it restarts once) |
 | `settings.toml` next to `fracture.exe` | Your settings, and the install folder if it is not `game\` |
 | `logs\` next to `fracture.exe` | Log files, useful for bug reports |
 | `Documents\fracture` | Saves and the shader cache |
@@ -153,17 +158,19 @@ though `fracture.toml` still names the old location.
 ### Making a release
 
 ```
-python tools/package_release.py --version 0.3.0
+python tools/package_release.py --version 0.4.0
 ```
 
 builds the `win-amd64-release` preset and packs
-`out\release\FractureRecomp-v0.3.0-windows-x64.zip`: `fracture.exe`, the
-SDK's DLLs (checked against the SDK's own files), the Visual C++ runtime DLLs
-they import, `README.txt` and the third-party licenses. It checks every
-shipped binary's imports (each must be shipped or part of Windows) and packs
-only that list: never `game\`, the `.iso`, generated code, PDBs or the
-maintainer's `fracture.toml` / `settings.toml`. Codegen needs the game files,
-so this runs on the maintainer's machine, not in CI.
+`out\release\FractureRecomp-v0.4.0-windows-x64.zip`: `fracture.exe`, the
+game code of both releases (`fracture_v1.dll`, `fracture_v2.dll`), the SDK's
+DLLs (checked against the SDK's own files), the Visual C++ runtime DLLs they
+import, `README.txt` and the third-party licenses. It checks every shipped
+binary's imports (each must be shipped or part of Windows) and packs only
+that list: never `game\`, `xex\`, the `.iso`, generated code, PDBs or the
+maintainer's `fracture.toml` / `settings.toml`. Codegen needs both releases'
+`default.xex` (`xex\v1\` and `xex\v2\`: run setup once with each disc), so
+this runs on the maintainer's machine, not in CI.
 
 ## Settings
 

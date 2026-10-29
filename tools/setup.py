@@ -1,11 +1,14 @@
 """Prepare Fracture for launch from your own Xbox 360 disc image.
 
-1. Check the disc image is the supported Fracture release.
-2. Extract the game files into game/.
+1. Check the disc image is a supported Fracture release (default.xex
+   version 1 or 2).
+2. Extract the game files into game/ and default.xex into xex/<release>/,
+   the codegen input.
 3. Find the build tools.
 4. Build the ReXGlue SDK from its source (pinned commit) with Direct3D 12
    and Vulkan into third_party/; the SDK's own Windows package has no Vulkan.
-5. Recompile default.xex and build fracture.exe.
+5. Recompile default.xex and build fracture.exe and the game code DLL,
+   fracture_<release>.dll (one per release found in xex/).
 6. Write fracture.toml next to fracture.exe so it finds the game files.
 
 usage: setup.bat [path\\to\\Fracture.iso] [--config relwithdebinfo|release|debug]
@@ -27,11 +30,17 @@ import xdvdfs
 
 ROOT = Path(__file__).resolve().parent.parent
 GAME_DIR = ROOT / "game"
+XEX_DIR = ROOT / "xex"
 
-# The function overrides in config/ were made against this exact executable.
+# The function overrides in config/<release>/ were made against these exact
+# executables (src/fracture_installer.h has the same table).
 TITLE_ID = 0x4C4107D4
-DEFAULT_XEX_SHA256 = (
-    "13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2")
+RELEASES = {
+    "13fa6817089233d6d2b30adeca5c8bf74871ea28d0c620253aade6ee89557db2":
+        ("v1", "default.xex version 1"),
+    "6e1f8972281e02175617eb94bb9bde8baea1a1f767768dbfb0b4bed11b7bafee":
+        ("v2", "default.xex version 2 (USA, Europe, 7 languages)"),
+}
 SKIPPED_ISO_DIRS = ("$SystemUpdate/",)  # console dashboard update, not game data
 
 SDK_VERSION = "0.10.0"
@@ -115,21 +124,38 @@ def check_iso(iso, force):
             f"this is not Fracture (title ID {title_id or 0:08X}, "
             f"expected {TITLE_ID:08X})")
     digest = hashlib.sha256(data).hexdigest()
-    if digest != DEFAULT_XEX_SHA256:
-        message = ("default.xex differs from the supported release; the "
+    if digest in RELEASES:
+        release, name = RELEASES[digest]
+        print(f"Fracture, title ID {TITLE_ID:08X}, {name} verified")
+    else:
+        message = ("default.xex differs from the supported releases; the "
                    "function overrides in config/ will not match it")
         if not force:
             raise SetupError(message + " (pass --force to try anyway)")
-        print("warning: " + message)
-    print(f"Fracture, title ID {TITLE_ID:08X}, default.xex verified")
+        print("warning: " + message + "; trying version 1's")
+        release = "v1"
     return [e for e in entries if not e.is_dir
-            and not e.path.startswith(SKIPPED_ISO_DIRS)]
+            and not e.path.startswith(SKIPPED_ISO_DIRS)], release, digest
 
 
-def extract_game(iso, entries):
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def extract_game(iso, entries, digest):
     step(f"Extracting game files into {GAME_DIR}")
+    # Files of the right size are kept, so a second run resumes the first,
+    # but only for the same release: the two have files of equal size and
+    # different content.
+    xex = GAME_DIR / "default.xex"
+    same_release = not xex.is_file() or file_sha256(xex) == digest
     todo = [e for e in entries
-            if not (GAME_DIR / e.path).is_file()
+            if not same_release
+            or not (GAME_DIR / e.path).is_file()
             or (GAME_DIR / e.path).stat().st_size != e.size]
     if not todo:
         print(f"all {len(entries)} files already extracted")
@@ -149,6 +175,17 @@ def extract_game(iso, entries):
                           end="", flush=True)
             xdvdfs.extract(f, e, str(GAME_DIR / e.path), progress)
     print(f"\nextracted {len(todo)} files")
+
+
+def copy_codegen_input(release):
+    """default.xex into xex/<release>/, where the codegen manifest reads it."""
+    target = XEX_DIR / release / "default.xex"
+    source = GAME_DIR / "default.xex"
+    if target.is_file() and file_sha256(target) == file_sha256(source):
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, target)
+    print(f"copied default.xex to {target}")
 
 
 # --- 2. toolchain ---------------------------------------------------------
@@ -346,11 +383,13 @@ def build_sdk(env, config):
 
 # --- 4. build -------------------------------------------------------------
 
-def build(env, config):
+def build(env, config, releases=()):
+    """Builds fracture.exe and the game code of every release in xex/;
+    `releases` are the ones that must be there afterwards."""
     preset = f"win-amd64-{config}"
     step(f"Recompiling default.xex and building ({preset}); "
          "this takes several minutes")
-    # CMake only picks up the generated sources (generated/default/
+    # CMake only picks up the generated sources (generated/<release>/
     # sources.cmake) when it configures after codegen, so run codegen on its
     # own first, then configure again and build everything.
     for args in (["cmake", "--preset", preset],
@@ -360,8 +399,9 @@ def build(env, config):
                  ["cmake", "--build", "--preset", preset]):
         run(args, ROOT, env)
     exe = ROOT / "out" / "build" / preset / "fracture.exe"
-    if not exe.is_file():
-        raise SetupError(f"build finished but {exe} is missing")
+    for path in [exe] + [exe.with_name(f"fracture_{r}.dll") for r in releases]:
+        if not path.is_file():
+            raise SetupError(f"build finished but {path} is missing")
     return exe
 
 
@@ -388,11 +428,12 @@ def main():
         raise SetupError("only Windows x64 is supported for now")
 
     iso = find_iso(args.iso)
-    entries = check_iso(iso, args.force)
-    extract_game(iso, entries)
+    entries, release, digest = check_iso(iso, args.force)
+    extract_game(iso, entries, digest)
+    copy_codegen_input(release)
     env = find_toolchain()
     build_sdk(env, args.config)
-    exe = build(env, args.config)
+    exe = build(env, args.config, [release])
     write_config(exe)
     step("Done")
     print(f"Run: {exe}")

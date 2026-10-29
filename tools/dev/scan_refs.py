@@ -3,13 +3,15 @@ them directly: their address is only stored in data (vtables, static
 initializer tables, callback tables) or built in code with lis + addi/ori
 (callbacks, pointers to virtual member functions).
 
-usage: python tools/dev/scan_refs.py [--code] <image.bin> <generated/default dir>
+usage: python tools/dev/scan_refs.py [--code] <image.bin> <generated dir>
                                      [--check ADDR ...]
 
-image.bin is the guest image dumped from 0x82000000 (--fracture_dump_image).
-Without --code it scans data words; with --code it scans lis/addi and lis/ori
-pairs inside known functions. Prints TOML [functions] entries (start-only)
-for each candidate.
+image.bin is the guest image dumped from 0x82000000 (--fracture_dump_image)
+by a build of the same release as the generated dir (generated/default for
+default.xex version 1, generated/v2 for version 2), whose fracture_pch.h
+gives the code range. Without --code it scans data words; with --code it
+scans lis/addi and lis/ori pairs inside known functions. Prints TOML
+[functions] entries (start-only) for each candidate.
 """
 import argparse
 import bisect
@@ -21,8 +23,6 @@ import re
 import struct
 import sys
 
-IMAGE_BASE = 0x82000000
-CODE_START, CODE_END = 0x821E0000, 0x832829F4
 MAX_WALK = 4096  # instructions
 
 parser = argparse.ArgumentParser()
@@ -38,6 +38,13 @@ parser.add_argument("--show-rejected", action="store_true",
 args = parser.parse_args()
 checks = [int(a, 16) for a in args.check]
 image = open(args.image, "rb").read()
+
+pch = open(os.path.join(args.gen_dir, "fracture_pch.h"), encoding="utf-8").read()
+layout = {k: int(v, 16) for k, v in re.findall(
+    r"#define REX_(IMAGE_BASE|CODE_BASE|CODE_SIZE) (0x[0-9A-Fa-f]+)", pch)}
+IMAGE_BASE = layout["IMAGE_BASE"]
+CODE_START = layout["CODE_BASE"]
+CODE_END = CODE_START + layout["CODE_SIZE"]
 
 
 def word(addr):

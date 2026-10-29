@@ -8,10 +8,17 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace fracture::frame_rate {
 
 // Reads the fracture_frame_rate cvar and follows its changes. Call before
 // the guest starts.
 void Init();
+
+// The D3DPRESENT_INTERVAL_* value the game's swap should use instead of its
+// own, or 0 to leave the game's alone. Read by the swap hook of each
+// release's recompiled code (src/game/), on guest threads.
+uint32_t Interval();
 
 }  // namespace fracture::frame_rate

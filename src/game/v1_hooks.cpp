@@ -1,10 +1,13 @@
-// fracture - hand-written replacements for guest functions that codegen
-// cannot express on its own.
+// fracture - hand-written replacements for guest functions of default.xex
+// version 1 (media ID 20E2A1F5). Every address here is that release's.
 
 #include <rex/hook.h>
 #include <rex/ppc/context.h>
 
+#include "swap_interval.h"
+
 REX_EXTERN(sub_82DFDD8C);
+REX_EXTERN(__imp__sub_822A4350);
 
 // 0x82DFDD68, a QueryInterface-style cast reached through a vtable, shares
 // its tail at 0x82DFDD80 with sub_82DFDD8C (which jumps there), and guest
@@ -24,4 +27,9 @@ REX_HOOK_RAW(sub_82DFDD68) {
   }
   ctx.r11.u64 = ctx.r3.u64 - 4;
   ctx.r3.u64 = ctx.r11.u32 != 0 ? ctx.r3.u64 + 72 : 0;
+}
+
+// D3D's swap step that queues the frame for its vblank (r3 = device).
+REX_HOOK_RAW(sub_822A4350) {
+  fracture::game::SwapWithInterval(ctx, base, __imp__sub_822A4350);
 }

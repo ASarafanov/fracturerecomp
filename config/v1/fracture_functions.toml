@@ -35,7 +35,7 @@
 # 0x82DFDD68 (QueryInterface-style) shares its tail at 0x82DFDD80 with
 # 0x82DFDD8C, which jumps there with "b 0x82DFDD80". Functions cannot
 # overlap, so the tail stays a function of its own for that jump, codegen
-# gets 0x82DFDD68 up to the tail, and src/fracture_hooks.cpp replaces it
+# gets 0x82DFDD68 up to the tail, and src/game/v1_hooks.cpp replaces it
 # with the whole function.
 "0x82DFDD68" = { end = 0x82DFDD80 }
 "0x82DFDD80" = { end = 0x82DFDD8C }

@@ -1,0 +1,133 @@
+# Functions whose address is built in code with "lis rX,hi" followed by
+# "addi rY,rX,lo" or "ori rY,rX,lo" (callbacks, pointers to virtual member
+# functions such as vcall thunks) and that nothing calls directly, so the
+# analyzer does not discover them; default.xex version 2
+# (config/v1/fracture_code_refs.toml is version 1).
+#
+# Generated: tools/dev/scan_refs.py --code <image dump> generated/v2, then
+# tools/dev/prune_splits.py with each codegen log until codegen is clean:
+# it removes hits that cut another function in two and adds functions that a
+# scanned thunk tail-calls. Entries are start-only; the analyzer sizes each
+# function itself.
+
+[functions]
+
+"0x822C1338" = {}
+"0x822ED7D0" = {}
+"0x822F3930" = {}
+"0x822F3940" = {}
+"0x82308F80" = {}
+"0x82313278" = {}
+"0x82315820" = {}
+"0x82315830" = {}
+"0x82315840" = {}
+"0x82315850" = {}
+"0x82315860" = {}
+"0x82321760" = {}
+"0x82321828" = {}
+"0x82321830" = {}
+"0x82321840" = {}
+"0x82328D28" = {}
+"0x82348D90" = {}
+"0x82348DA0" = {}
+"0x82348DB0" = {}
+"0x82348DD0" = {}
+"0x8234BDD8" = {}
+"0x8234BDE8" = {}
+"0x8234BDF8" = {}
+"0x8234BE08" = {}
+"0x8239F5F0" = {}
+"0x8239F600" = {}
+"0x8239F610" = {}
+"0x823ADD98" = {}
+"0x823ADDA8" = {}
+"0x8243D970" = {}
+"0x82478A90" = {}
+"0x82478AA0" = {}
+"0x82491B98" = {}
+"0x824BFAC8" = {}
+"0x824BFAD8" = {}
+"0x824BFAE8" = {}
+"0x824BFAF8" = {}
+"0x824BFB08" = {}
+"0x824BFB18" = {}
+"0x82792D18" = {}
+"0x82792D28" = {}
+"0x82792D38" = {}
+"0x82792D48" = {}
+"0x827E0150" = {}
+"0x82833AC8" = {}
+"0x82833AF0" = {}
+"0x82833B18" = {}
+"0x82833B30" = {}
+"0x82833B48" = {}
+"0x82833B60" = {}
+"0x82833B78" = {}
+"0x82A6E3A0" = {}
+"0x82AA5808" = {}
+"0x82BD2998" = {}
+"0x82BD29A8" = {}
+"0x82BD29B8" = {}
+"0x82C3F990" = {}
+"0x82C5F8C0" = {}
+"0x82C63F90" = {}
+"0x82C8F138" = {}
+"0x82CA0DE8" = {}
+"0x82CA0E28" = {}
+"0x82CA0E38" = {}
+"0x82CBF000" = {}
+"0x82CC4C48" = {}
+"0x82CFC810" = {}
+"0x82D59908" = {}
+"0x82D59930" = {}
+"0x82D59940" = {}
+"0x82D85DD8" = {}
+"0x82DDF3F0" = {}
+"0x82DDF5E0" = {}
+"0x82DDF5F0" = {}
+"0x82DDF600" = {}
+"0x82DDF610" = {}
+"0x82DDF620" = {}
+"0x82DDF630" = {}
+"0x82DDF640" = {}
+"0x82DDF650" = {}
+"0x82DFE870" = {}
+"0x82DFE880" = {}
+"0x82DFE890" = {}
+"0x82E41490" = {}
+"0x82E4BBB8" = {}
+"0x82E76338" = {}
+"0x82EC2678" = {}
+"0x82EE5668" = {}
+"0x82EE5678" = {}
+"0x82F97750" = {}
+"0x82FC0CD8" = {}
+"0x82FC0CF0" = {}
+"0x82FC0D08" = {}
+"0x82FC0D20" = {}
+"0x82FC0D38" = {}
+"0x82FC0D50" = {}
+"0x82FC0D68" = {}
+"0x82FC12C8" = {}
+"0x82FC12D8" = {}
+"0x82FC12E8" = {}
+"0x82FC12F8" = {}
+"0x83029ED0" = {}
+"0x83029EE0" = {}
+"0x83063368" = {}
+"0x830ABE40" = {}
+"0x830ABE48" = {}
+"0x831002F0" = {}
+"0x83117A60" = {}
+"0x8312E460" = {}
+"0x8312E7A8" = {}
+"0x83225340" = {}
+"0x83225378" = {}
+"0x83225380" = {}
+"0x8322D6C0" = {}
+"0x8322D6D0" = {}
+"0x8322D6E0" = {}
+"0x8323B1F8" = {}
+"0x83248198" = {}
+"0x83255CD0" = {}
+"0x83255CE8" = {}

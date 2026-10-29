@@ -57,7 +57,8 @@ constexpr ImU32 kColBackground = IM_COL32(12, 14, 19, 255);
 constexpr ImU32 kColErrorBg = IM_COL32(255, 110, 96, 30);
 constexpr ImU32 kColPrimaryIdle = IM_COL32(255, 138, 36, 190);
 
-// The game files on the supported disc, shown until the disc is read.
+// The game files on a supported disc (version 1; version 2 is 48 KB less),
+// shown until the disc is read.
 constexpr uint64_t kTypicalBytes = 4096365604ull;
 // Headroom on top of the game files.
 constexpr uint64_t kSpareBytes = 64ull << 20;
@@ -317,7 +318,8 @@ void InstallerDialog::CheckDisc(std::filesystem::path image) {
 void InstallerDialog::CheckFolder(std::filesystem::path dir) {
   game_folder_ = dir;
   message_.clear();
-  folder_check_ = std::async(std::launch::async, CheckGameFolder, std::move(dir));
+  folder_check_ = std::async(std::launch::async,
+                             [dir = std::move(dir)] { return CheckGameFolder(dir); });
 }
 
 void InstallerDialog::SetFolder(std::filesystem::path folder) {
@@ -658,8 +660,8 @@ void InstallerDialog::DrawScreen(ImGuiIO& io, const Layout& L, const std::vector
         disc_status = "Checking the disc image...";
         disc_col = kColTextDim;
       } else if (disc_) {
-        disc_status = fmt::format("Fracture, title ID {:08X}: the supported release. {} files, {}.",
-                                  kTitleId, disc_->files.size(), SizeText(disc_->total_bytes));
+        disc_status = fmt::format("Fracture, {}: supported. {} files, {}.", disc_->release->name,
+                                  disc_->files.size(), SizeText(disc_->total_bytes));
         disc_col = kColGood;
       } else if (!disc_error_.empty()) {
         disc_status = disc_error_;
