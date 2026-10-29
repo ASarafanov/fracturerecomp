@@ -16,6 +16,8 @@ set(FRACTURE_SOURCES
     src/fracture_frame_rate.cpp
     src/fracture_graphics.cpp
     src/fracture_hooks.cpp
+    src/fracture_installer.cpp
+    src/fracture_installer_dialog.cpp
     src/fracture_menu_input.cpp
     src/fracture_settings.cpp
     src/fracture_settings_dialog.cpp
@@ -30,6 +32,9 @@ endif()
 rexglue_setup_target(fracture GPU_PLUGINS xenos)
 
 if(WIN32)
-    # Lists the Direct3D 12 adapters for the settings screen.
-    target_link_libraries(fracture PRIVATE dxgi)
+    # dxgi lists the Direct3D 12 adapters for the settings screen; ole32,
+    # shell32 and uuid give the install wizard the system file chooser.
+    target_link_libraries(fracture PRIVATE dxgi ole32 shell32 uuid)
+    # UTF-8 as the process code page, merged into the linker's manifest.
+    target_sources(fracture PRIVATE src/fracture.manifest)
 endif()

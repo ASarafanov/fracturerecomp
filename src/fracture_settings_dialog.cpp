@@ -4,7 +4,9 @@
 
 #include "fracture_graphics.h"
 #include "fracture_menu_input.h"
+#include "fracture_paths.h"
 #include "fracture_settings.h"
+#include "fracture_ui.h"
 
 #include <rex/cvar.h>
 #include <rex/logging.h>
@@ -13,7 +15,6 @@
 
 #include <algorithm>
 #include <cfloat>
-#include <cmath>
 #include <filesystem>
 #include <string_view>
 #include <utility>
@@ -53,93 +54,7 @@ constexpr float kDescTextSize = 23.0f;
 constexpr float kSmallTextSize = 21.0f;
 constexpr int kVisibleRows = int((kRowsBottom - kTop) / kRowH);
 
-constexpr ImU32 kColDim = IM_COL32(6, 8, 12, 222);
-constexpr ImU32 kColPanel = IM_COL32(24, 28, 36, 235);
-constexpr ImU32 kColSelect = IM_COL32(255, 255, 255, 26);
-constexpr ImU32 kColSelectIdle = IM_COL32(255, 255, 255, 12);
-constexpr ImU32 kColValueBox = IM_COL32(0, 0, 0, 70);
-constexpr ImU32 kColText = IM_COL32(236, 239, 244, 255);
-constexpr ImU32 kColTextDim = IM_COL32(160, 168, 182, 255);
-constexpr ImU32 kColTextFaint = IM_COL32(100, 108, 122, 255);
-constexpr ImU32 kColAccent = IM_COL32(255, 138, 36, 255);
-constexpr ImU32 kColAccentIdle = IM_COL32(255, 138, 36, 110);
-constexpr ImU32 kColWarn = IM_COL32(255, 196, 64, 255);
-constexpr ImU32 kColWarnBg = IM_COL32(255, 196, 64, 30);
-constexpr ImU32 kColChip = IM_COL32(236, 239, 244, 255);
-constexpr ImU32 kColChipText = IM_COL32(16, 18, 22, 255);
-
-bool Contains(ImVec2 min, ImVec2 max, ImVec2 p) {
-  return p.x >= min.x && p.x < max.x && p.y >= min.y && p.y < max.y;
-}
-
-ImVec2 TextSize(ImFont* font, float size, std::string_view text, float wrap = 0.0f) {
-  return font->CalcTextSizeA(size, FLT_MAX, wrap, text.data(), text.data() + text.size());
-}
-
-// Shortens `text` with "..." until it fits `max_width` (long GPU names).
-std::string FitText(ImFont* font, float size, std::string text, float max_width) {
-  if (TextSize(font, size, text).x <= max_width) {
-    return text;
-  }
-  while (!text.empty() && TextSize(font, size, text + "...").x > max_width) {
-    text.pop_back();
-  }
-  return text + "...";
-}
-
-void DrawText(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, ImU32 col,
-              std::string_view text, float wrap = 0.0f) {
-  dl->AddText(font, size, ImVec2(std::floor(pos.x), std::floor(pos.y)), col, text.data(),
-              text.data() + text.size(), wrap);
-}
-
-void DrawChevron(ImDrawList* dl, ImVec2 center, float half, bool left, ImU32 col) {
-  if (left) {
-    dl->AddTriangleFilled(ImVec2(center.x - half * 0.6f, center.y),
-                          ImVec2(center.x + half * 0.4f, center.y - half),
-                          ImVec2(center.x + half * 0.4f, center.y + half), col);
-  } else {
-    dl->AddTriangleFilled(ImVec2(center.x + half * 0.6f, center.y),
-                          ImVec2(center.x - half * 0.4f, center.y + half),
-                          ImVec2(center.x - half * 0.4f, center.y - half), col);
-  }
-}
-
-bool Pressed(ImGuiKey key) {
-  return ImGui::IsKeyPressed(key, true);
-}
-
-bool AnyKeyboardKeyDown() {
-  for (int key = ImGuiKey_Tab; key <= ImGuiKey_KeypadEqual; ++key) {
-    if (ImGui::IsKeyDown(ImGuiKey(key))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Controller auto-repeat for a held direction.
-constexpr float kPadRepeatDelay = 0.35f;
-constexpr float kPadRepeatInterval = 0.09f;
-constexpr int16_t kPadStickThreshold = 16384;
-
-int Repeat(int direction, int& held, float& timer, float delta_time) {
-  if (direction == 0) {
-    held = 0;
-    return 0;
-  }
-  if (direction != held) {
-    held = direction;
-    timer = kPadRepeatDelay;
-    return direction;
-  }
-  timer -= delta_time;
-  if (timer > 0.0f) {
-    return 0;
-  }
-  timer += kPadRepeatInterval;
-  return direction;
-}
+using namespace fracture::ui;
 
 }  // namespace
 
@@ -204,8 +119,10 @@ struct SettingsDialog::Layout {
 Fonts LoadFonts(ImFontAtlas* atlas) {
   Fonts fonts;
 #if defined(_WIN32)
-  // Basic Latin + Latin-1, dashes to ellipsis, arrows (key hints).
-  static const ImWchar kRanges[] = {0x0020, 0x00FF, 0x2013, 0x2026, 0x2190, 0x2193, 0};
+  // Latin (with Extended-A) and Cyrillic for paths and GPU names, dashes to
+  // ellipsis, arrows (key hints).
+  static const ImWchar kRanges[] = {0x0020, 0x017F, 0x0400, 0x04FF, 0x2013, 0x2026,
+                                     0x2190, 0x2193, 0};
   wchar_t windows_dir[MAX_PATH] = {};
   const UINT length = GetWindowsDirectoryW(windows_dir, MAX_PATH);
   if (length == 0 || length >= MAX_PATH) {
@@ -215,14 +132,15 @@ Fonts LoadFonts(ImFontAtlas* atlas) {
   auto load = [&](const char* file, float size) -> ImFont* {
     const auto path = fonts_dir / file;
     if (!std::filesystem::exists(path)) {
-      REXLOG_WARN("Settings: font {} not found", path.string());
+      REXLOG_WARN("Settings: font {} not found", PathText(path));
       return nullptr;
     }
     ImFontConfig config;
     config.OversampleH = 2;
     config.OversampleV = 1;
     config.PixelSnapH = true;
-    return atlas->AddFontFromFileTTF(path.string().c_str(), size, &config, kRanges);
+    return atlas->AddFontFromFileTTF(reinterpret_cast<const char*>(path.u8string().c_str()),
+                                      size, &config, kRanges);
   };
   fonts.body = load("segoeui.ttf", kBodyBakeSize);
   fonts.strong = load("seguisb.ttf", kBodyBakeSize);

@@ -2,6 +2,8 @@
 
 #include "fracture_settings.h"
 
+#include "fracture_paths.h"
+
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
@@ -204,10 +206,69 @@ toml::table ReadBaseConfig() {
     return {};
   }
   try {
-    return toml::parse_file(g_base_config_path.string());
+    return toml::parse_file(g_base_config_path.u8string());
   } catch (const toml::parse_error&) {
     return {};
   }
+}
+
+bool IsAscii(const std::filesystem::path& path) {
+  const auto& native = path.native();
+  return std::all_of(native.begin(), native.end(), [](auto c) { return unsigned(c) < 0x80; });
+}
+
+#if defined(_WIN32)
+std::filesystem::path ShortPath(const std::filesystem::path& path) {
+  const DWORD length = GetShortPathNameW(path.c_str(), nullptr, 0);
+  if (length == 0) {
+    return {};
+  }
+  std::wstring buffer(length, L'\0');
+  const DWORD written = GetShortPathNameW(path.c_str(), buffer.data(), length);
+  if (written == 0 || written >= length) {
+    return {};
+  }
+  buffer.resize(written);
+  return std::filesystem::path(buffer);
+}
+#endif
+
+// rex::cvar::LoadConfig hands path::string() (the ANSI code page) to
+// toml++, which reads it as UTF-8, so a file in a folder with non-ASCII
+// characters (C:\Users\<name>\Downloads) does not load. Give it an ASCII
+// path to the same content then: the 8.3 short name, or a copy in the temp
+// folder (by its short name). LoadConfig is still the one to use: it keeps
+// command-line flags on top and holds values for plugin cvars until they
+// are registered.
+bool LoadConfigFile(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  if (!IsAscii(path)) {
+    const auto short_path = ShortPath(path);
+    if (!short_path.empty() && IsAscii(short_path)) {
+      rex::cvar::LoadConfig(short_path);
+      return true;
+    }
+    wchar_t temp[MAX_PATH + 1] = {};
+    const DWORD length = GetTempPathW(MAX_PATH + 1, temp);
+    const auto temp_dir = length ? ShortPath(std::filesystem::path(temp)) : std::filesystem::path();
+    if (!temp_dir.empty() && IsAscii(temp_dir)) {
+      const auto copy = temp_dir / fmt::format("fracture-{}-config.toml", GetCurrentProcessId());
+      std::error_code ec;
+      std::filesystem::copy_file(path, copy, std::filesystem::copy_options::overwrite_existing,
+                                 ec);
+      if (!ec) {
+        rex::cvar::LoadConfig(copy);
+        std::filesystem::remove(copy, ec);
+        return true;
+      }
+    }
+    REXLOG_WARN("Settings: cannot load {}: the SDK cannot open files in this folder",
+                PathText(path));
+    return false;
+  }
+#endif
+  rex::cvar::LoadConfig(path);
+  return true;
 }
 
 // Keeps one cvar per line in the dump.
@@ -225,12 +286,19 @@ std::filesystem::path Path() {
 
 void Load(const std::filesystem::path& base_config_path) {
   g_base_config_path = base_config_path;
+  // The SDK's own load of the base config fails in such a folder (see
+  // LoadConfigFile). Its logging cvars are applied by now; the rest still
+  // matters.
+  if (!IsAscii(base_config_path) && std::filesystem::exists(base_config_path)) {
+    LoadConfigFile(base_config_path);
+  }
   const auto path = Path();
   if (!std::filesystem::exists(path)) {
     return;
   }
-  rex::cvar::LoadConfig(path);
-  REXLOG_INFO("Settings: applied {}", path.string());
+  if (LoadConfigFile(path)) {
+    REXLOG_INFO("Settings: applied {}", PathText(path));
+  }
 }
 
 bool Save(const std::vector<std::pair<std::string, std::string>>& changes) {
@@ -238,15 +306,15 @@ bool Save(const std::vector<std::pair<std::string, std::string>>& changes) {
   toml::table table;
   if (std::filesystem::exists(path)) {
     try {
-      table = toml::parse_file(path.string());
+      table = toml::parse_file(path.u8string());
     } catch (const toml::parse_error& err) {
       // Keep the broken file for the user instead of silently dropping it.
       auto backup = path;
       backup += ".bad";
       std::error_code ec;
       std::filesystem::rename(path, backup, ec);
-      REXLOG_WARN("Settings: {} is not valid TOML ({}), moved it to {}", path.string(),
-                  err.description(), backup.string());
+      REXLOG_WARN("Settings: {} is not valid TOML ({}), moved it to {}", PathText(path),
+                  err.description(), PathText(backup));
     }
   }
 
@@ -271,17 +339,17 @@ bool Save(const std::vector<std::pair<std::string, std::string>>& changes) {
     std::ofstream out(temp, std::ios::binary | std::ios::trunc);
     out << kHeader << table << '\n';
     if (!out) {
-      REXLOG_ERROR("Settings: failed to write {}", temp.string());
+      REXLOG_ERROR("Settings: failed to write {}", PathText(temp));
       return false;
     }
   }
   std::error_code ec;
   std::filesystem::rename(temp, path, ec);
   if (ec) {
-    REXLOG_ERROR("Settings: failed to replace {}: {}", path.string(), ec.message());
+    REXLOG_ERROR("Settings: failed to replace {}: {}", PathText(path), ec.message());
     return false;
   }
-  REXLOG_INFO("Settings: saved {} change(s) to {}", applied, path.string());
+  REXLOG_INFO("Settings: saved {} change(s) to {}", applied, PathText(path));
   return true;
 }
 

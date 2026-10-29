@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Makes UTF-8 the process's ANSI code page (Windows 10 1903 and later). The
+  SDK turns paths into text with path::string() and back from char*
+  (config files, logs, dropped files, achievements), which otherwise uses
+  the system code page and breaks folders with non-Latin names.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
