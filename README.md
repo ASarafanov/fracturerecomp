@@ -10,7 +10,7 @@ An unofficial native recompilation of the Xbox 360 version of **Fracture**
 
 The game's PowerPC code is translated to C++ ahead of time and compiled into a
 regular Windows executable. Rendering goes through the SDK's emulated Xenos GPU
-(Direct3D 12 / Vulkan).
+(Direct3D 12).
 
 > **Status: early.** The game boots and runs on the test machine (Windows 11,
 > GeForce RTX 4080 SUPER). It has not been played through or tried on other
@@ -81,6 +81,42 @@ published on the SDK's GitHub release and stops if the file is altered or
 missing. Whether to allow the file (Windows Security > Protection history) or
 exclude the `third_party\rexglue-sdk` folder is your decision.
 
+## Settings
+
+In the game, press **Esc** or **F1**, or **RB + Start** on a controller
+(R1 + Options on a DualSense), to open the settings screen. It works with the
+keyboard, the mouse and a controller; the game gets no input while it is open.
+
+| Category | Settings |
+| --- | --- |
+| Display | Fullscreen, monitor, window size, keep aspect ratio, allow tearing |
+| Graphics | Frame rate (30, or 60 as an experiment), graphics card, internal resolution (1x to 4x), anti-aliasing (FXAA), texture filtering, render path (fast RTV or accurate ROV) |
+| Controls | Controller API (SDL or XInput), the shortcut that opens the screen, keyboard and mouse, mouse look and sensitivity |
+| Audio | Mute, audio latency |
+| System | Restart now, revert pending changes, close the screen, quit |
+
+| Keyboard | Controller | Action |
+| --- | --- | --- |
+| Arrows | D-pad, left stick | Select, change the value |
+| Enter, Space | A | Confirm |
+| Esc, Backspace | B | Back (rows, categories, closed) |
+| Q / E | LB / RB | Previous / next category |
+| R twice | X twice | Restart now (when changes are pending) |
+
+Some settings apply at once. The others turn yellow and take effect after a
+restart: press R (X on a controller) twice, or use System > Restart Now.
+
+- Choices are saved to `settings.toml` next to `fracture.exe`. It is applied
+  after `fracture.toml`, so its values win; delete a line to go back to the
+  default.
+- Command-line flags such as `--resolution_scale=2` win over both files. The
+  screen marks those settings with `*`.
+- The game was made for 30 FPS. At 60 it kept its normal speed in testing,
+  but some of its timers count frames, so 60 stays marked experimental.
+- The SDK's own overlays are still there: F3 toggles its debug overlay, the
+  backtick key opens a log console, and F4 lists every cvar for advanced use.
+  F4's "Save to config" writes `fracture.toml`.
+
 ## Development
 
 | Path | Purpose |
@@ -89,8 +125,12 @@ exclude the `third_party\rexglue-sdk` folder is your decision.
 | `config/fracture_functions.toml` | Hand-checked function boundary overrides |
 | `config/fracture_data_refs.toml` | Function starts referenced only from data, found by scanning the guest image |
 | `config/fracture_code_refs.toml` | Function starts whose address is built in code with `lis` + `addi`/`ori` |
-| `src/fracture_app.h` | App hooks: Xenos GPU by default, `game_data_root` from `fracture.toml`, image dump |
+| `src/fracture_app.h` | App hooks: Xenos GPU by default, `game_data_root` from `fracture.toml`, settings screen, image dump |
 | `src/fracture_hooks.cpp` | Hand-written guest functions that codegen cannot express |
+| `src/fracture_settings.{h,cpp}` | `settings.toml`, restart, `--fracture_dump_cvars` (lists every cvar) |
+| `src/fracture_settings_dialog.{h,cpp}` | The settings screen |
+| `src/fracture_menu_input.{h,cpp}` | Controller input for the screen: wraps the game's `XamInputGetState` |
+| `src/fracture_frame_rate.{h,cpp}` | The 60 FPS option: the game's Direct3D presentation interval |
 | `tools/setup.py` | The setup program |
 | `tools/xdvdfs.py` | Xbox disc image reader |
 | `tools/dev/` | Analysis helpers used to produce the configs (`scan_refs.py`, `prune_splits.py`, `fallthrough.py`) |
@@ -124,8 +164,16 @@ Findings so far:
   functions cannot overlap, so `0x82DFDD68` gets its shared tail from a
   hand-written copy in `src/fracture_hooks.cpp`, and `0x8263A850` is
   declared whole in `config/fracture_functions.toml`.
-- **Next:** look at what the game actually shows, then missing kernel
-  imports and GPU issues as they come up.
+- **Frame rate.** The game's Direct3D presents every second vblank
+  (`D3DPRESENT_INTERVAL_TWO`). The interval is read from the device in
+  `sub_822A4350`; a hook there swaps in a shorter one and calls the original
+  (`__imp__sub_822A4350`), so the guest vblank stays at 60 Hz.
+- **Controller input.** Generated code calls the SDK's `XamInputGetState`
+  directly, so `src/fracture_menu_input.cpp` defines that symbol, calls the
+  SDK's function and filters what the game reads.
+- **Next:** missing kernel imports and GPU issues as they come up. A
+  Direct3D 12 / Vulkan switch needs an SDK build with Vulkan: the prebuilt
+  0.10.0 Windows GPU plugin is Direct3D 12 only.
 
 The image dump is decrypted retail code: keep it out of the repository.
 
