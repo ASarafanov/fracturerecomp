@@ -77,6 +77,17 @@ it from PowerShell (a quoted path needs `&` in front):
 & .\out\build\win-amd64-relwithdebinfo\fracture.exe
 ```
 
+### Another PC or a Steam Deck
+
+Copy the whole repository folder, including `game\` and `out\`. The game finds
+`game\` again on its own, even though `fracture.toml` still names the old
+location.
+
+For a Steam Deck (not tested yet): build on a Windows PC, copy the folder to
+the Deck, add `out\build\win-amd64-relwithdebinfo\fracture.exe` as a
+non-Steam game in Desktop Mode and turn on Proton for it (Properties >
+Compatibility). Graphics API "Automatic" picks Vulkan under Proton.
+
 ### Antivirus
 
 Earlier versions downloaded the SDK's prebuilt release archive, which

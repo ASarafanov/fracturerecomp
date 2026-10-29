@@ -5,6 +5,7 @@
 #pragma once
 
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
 #include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
@@ -12,11 +13,13 @@
 #include <rex/ui/window.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 
 #include "fracture_frame_rate.h"
 #include "fracture_graphics.h"
@@ -68,6 +71,12 @@ class FractureApp : public rex::ReXApp {
   // The SDK reads game_data_root before it loads fracture.toml, so a value
   // set there (tools/setup.py writes one) would be ignored. Pick it up here,
   // after the config file has been applied.
+  //
+  // setup.py stores an absolute path, which is gone once the folder is moved
+  // or copied to another machine (a Steam Deck sees it through Proton under
+  // another drive). Then look for game\ where setup puts it: the repository
+  // root, three levels above out\build\<preset>\fracture.exe, or next to the
+  // exe.
   std::optional<rex::PathConfig> OnFinalizePaths(
       const rex::PathConfig& defaults,
       std::function<void(rex::PathConfig)> resume) override {
@@ -75,6 +84,18 @@ class FractureApp : public rex::ReXApp {
     rex::PathConfig paths = defaults;
     if (paths.game_data_root.empty()) {
       paths.game_data_root = REXCVAR_GET(game_data_root);
+    }
+    if (!HasGameData(paths.game_data_root)) {
+      const auto exe_dir = rex::filesystem::GetExecutableFolder();
+      for (const auto& candidate :
+           {exe_dir.parent_path().parent_path().parent_path() / "game", exe_dir / "game"}) {
+        if (HasGameData(candidate)) {
+          REXLOG_INFO("Game data not found at '{}', using {}",
+                      paths.game_data_root.string(), candidate.string());
+          paths.game_data_root = candidate;
+          break;
+        }
+      }
     }
     return paths;
   }
@@ -183,6 +204,11 @@ class FractureApp : public rex::ReXApp {
     if (window()) {
       window()->SetCursorVisibility(cursor_before_settings_);
     }
+  }
+
+  static bool HasGameData(const std::filesystem::path& dir) {
+    std::error_code ec;
+    return !dir.empty() && std::filesystem::is_regular_file(dir / "default.xex", ec);
   }
 
   void ToggleSettings() {
