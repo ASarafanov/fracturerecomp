@@ -13,6 +13,7 @@ include(generated/rexglue.cmake)
 # Sources
 set(FRACTURE_SOURCES
     src/main.cpp
+    src/fracture_frame_rate.cpp
     src/fracture_hooks.cpp
     src/fracture_menu_input.cpp
     src/fracture_settings.cpp

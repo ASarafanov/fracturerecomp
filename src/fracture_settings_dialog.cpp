@@ -342,7 +342,14 @@ void SettingsDialog::BuildCategories() {
                                 "d3d12_allow_variable_refresh_rate_and_tearing",
                                 {{"Off", "false"}, {"On", "true"}}));
 
-  Category graphics{"Graphics", "Rendering resolution and image quality."};
+  Category graphics{"Graphics", "Frame rate, rendering resolution and image quality."};
+  graphics.rows.push_back(choice("Frame Rate",
+                                 "Fracture was made for 30 FPS. 60 is experimental: in "
+                                 "testing the game kept its normal speed, but some of its "
+                                 "timers count frames. Applies at once; if anything moves too "
+                                 "fast, go back to 30.",
+                                 "fracture_frame_rate",
+                                 {{"30 (Original)", "original"}, {"60 (Experimental)", "60"}}));
   if (const auto adapters = GraphicsAdapters(); !adapters.empty()) {
     std::vector<std::pair<std::string, std::string>> options = {{"Automatic", "-1"}};
     for (const auto& [index, name] : adapters) {

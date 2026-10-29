@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 
+#include "fracture_frame_rate.h"
 #include "fracture_menu_input.h"
 #include "fracture_settings.h"
 #include "fracture_settings_dialog.h"
@@ -112,9 +113,11 @@ class FractureApp : public rex::ReXApp {
     }
   }
 
-  // The menu chord (RB + Start by default) is seen on a guest thread, in the
+  // Both hooks run on guest threads and cache their cvars here, before the
+  // guest starts. The menu chord (RB + Start by default) is seen in the
   // game's own controller read; the screen lives on the UI thread.
   void OnPostSetup() override {
+    fracture::frame_rate::Init();
     fracture::menu_input::Init([this] {
       app_context().CallInUIThreadDeferred([this] { ToggleSettings(); });
     });
