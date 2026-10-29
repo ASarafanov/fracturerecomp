@@ -22,7 +22,6 @@
 #include "fracture_settings.h"
 #include "fracture_settings_dialog.h"
 
-
 REXCVAR_DECLARE(std::string, fracture_dump_image);
 REXCVAR_DECLARE(std::string, fracture_dump_cvars);
 

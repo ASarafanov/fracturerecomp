@@ -19,10 +19,44 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <dxgi.h>
 #endif
 
 namespace fracture::settings {
 namespace {
+
+// Hardware adapters as (index, name), indexed like the d3d12_adapter cvar:
+// the position in IDXGIFactory1::EnumAdapters1 order, software ones skipped.
+// On hybrid systems DXGI can list one GPU twice (different LUIDs, only the
+// first with the displays attached); only the first of each name and memory
+// size is kept, which is also the one automatic selection picks.
+std::vector<std::pair<int, std::string>> GraphicsAdapters() {
+  std::vector<std::pair<int, std::string>> adapters;
+#if defined(_WIN32)
+  IDXGIFactory1* factory = nullptr;
+  if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+    return adapters;
+  }
+  std::vector<std::pair<std::string, SIZE_T>> seen;
+  IDXGIAdapter1* adapter = nullptr;
+  for (UINT i = 0; factory->EnumAdapters1(i, &adapter) == S_OK; ++i) {
+    DXGI_ADAPTER_DESC1 desc{};
+    if (SUCCEEDED(adapter->GetDesc1(&desc)) && !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
+      char name[256] = {};
+      WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr,
+                          nullptr);
+      std::pair<std::string, SIZE_T> key{name, desc.DedicatedVideoMemory};
+      if (std::find(seen.begin(), seen.end(), key) == seen.end()) {
+        seen.push_back(key);
+        adapters.emplace_back(int(i), name);
+      }
+    }
+    adapter->Release();
+  }
+  factory->Release();
+#endif
+  return adapters;
+}
 
 // Sizes the faces are baked at; text is drawn at layout size times the screen
 // scale, so bake for about 1440p to stay sharp there and above.
@@ -73,6 +107,17 @@ bool Contains(ImVec2 min, ImVec2 max, ImVec2 p) {
 
 ImVec2 TextSize(ImFont* font, float size, std::string_view text, float wrap = 0.0f) {
   return font->CalcTextSizeA(size, FLT_MAX, wrap, text.data(), text.data() + text.size());
+}
+
+// Shortens `text` with "..." until it fits `max_width` (long GPU names).
+std::string FitText(ImFont* font, float size, std::string text, float max_width) {
+  if (TextSize(font, size, text).x <= max_width) {
+    return text;
+  }
+  while (!text.empty() && TextSize(font, size, text + "...").x > max_width) {
+    text.pop_back();
+  }
+  return text + "...";
 }
 
 void DrawText(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, ImU32 col,
@@ -269,6 +314,23 @@ void SettingsDialog::BuildCategories() {
                                  {"Monitor 2", "2"},
                                  {"Monitor 3", "3"},
                                  {"Monitor 4", "4"}}));
+  {
+    Row row{"Window Size",
+            "Size of the game window when it is not fullscreen, in Windows' scaled pixels "
+            "(at 150% scaling, 1280 x 720 covers 1920 x 1080 screen pixels)."};
+    const std::pair<const char*, const char*> sizes[] = {{"Default (1280 x 720)", "0x0"},
+                                                         {"1600 x 900", "1600x900"},
+                                                         {"1920 x 1080", "1920x1080"},
+                                                         {"2560 x 1440", "2560x1440"}};
+    for (const auto& [label, size] : sizes) {
+      const std::string_view text(size);
+      const size_t x = text.find('x');
+      row.options.push_back({label,
+                             {{"window_width", std::string(text.substr(0, x))},
+                              {"window_height", std::string(text.substr(x + 1))}}});
+    }
+    display.rows.push_back(std::move(row));
+  }
   display.rows.push_back(choice("Keep Aspect Ratio",
                                 "Show the 16:9 picture with black bars instead of stretching "
                                 "it to the window shape.",
@@ -281,6 +343,16 @@ void SettingsDialog::BuildCategories() {
                                 {{"Off", "false"}, {"On", "true"}}));
 
   Category graphics{"Graphics", "Rendering resolution and image quality."};
+  if (const auto adapters = GraphicsAdapters(); !adapters.empty()) {
+    std::vector<std::pair<std::string, std::string>> options = {{"Automatic", "-1"}};
+    for (const auto& [index, name] : adapters) {
+      options.emplace_back(name, std::to_string(index));
+    }
+    graphics.rows.push_back(choice("Graphics Card",
+                                   "The GPU the game renders on. Automatic picks the first one "
+                                   "Windows lists, and follows a GPU change.",
+                                   "d3d12_adapter", std::move(options)));
+  }
   {
     Row row{"Internal Resolution",
             "Renders the game at a multiple of the Xbox 360's 1280x720 and scales the result "
@@ -309,6 +381,13 @@ void SettingsDialog::BuildCategories() {
                                   {"4x", "3"},
                                   {"8x", "4"},
                                   {"16x", "5"}}));
+  graphics.rows.push_back(choice("Render Path",
+                                 "How the Xbox 360's EDRAM render targets are emulated. Fast "
+                                 "uses the GPU's own render targets. Accurate emulates them in "
+                                 "pixel shaders: it fixes some blending and format errors and is "
+                                 "much slower. Automatic picks Fast (Accurate on Intel GPUs).",
+                                 "render_target_path_d3d12",
+                                 {{"Automatic", ""}, {"Fast (RTV)", "rtv"}, {"Accurate (ROV)", "rov"}}));
 
   Category controls{"Controls", "Controllers, keyboard and mouse."};
   {
@@ -348,6 +427,17 @@ void SettingsDialog::BuildCategories() {
   Category audio{"Audio", "Sound output."};
   audio.rows.push_back(choice("Mute", "Silence all game audio.", "audio_mute",
                               {{"Off", "false"}, {"On", "true"}}));
+  {
+    Row row = choice("Audio Latency",
+                     "How many audio frames are queued ahead. Lower means less delay; raise "
+                     "it if the sound crackles or stutters.",
+                     "audio_maxqframes",
+                     {{"Low (4)", "4"}, {"Default (8)", "8"}, {"Stable (16)", "16"},
+                      {"Most Stable (32)", "32"}});
+    // The cvar reads as live, but the audio system sizes its queue at startup.
+    row.restart = true;
+    audio.rows.push_back(std::move(row));
+  }
 
   Category system{"System", "Pending changes, closing the screen and quitting."};
   system.rows.push_back(action(
@@ -787,6 +877,8 @@ void SettingsDialog::DrawScreen(ImGuiIO& io, const Layout& L) {
                 current != 0 ? chevron_on : kColTextFaint);
     DrawChevron(dl, ImVec2(vmax.x - L.S(22.0f), cy), half, false,
                 current != count - 1 ? chevron_on : kColTextFaint);
+    // Room between the two chevrons.
+    value = FitText(fonts_.body, size, std::move(value), (vmax.x - vmin.x) - L.S(88.0f));
     const ImVec2 value_size = TextSize(fonts_.body, size, value);
     DrawText(dl, fonts_.body, size,
              ImVec2((vmin.x + vmax.x - value_size.x) * 0.5f, cy - size * 0.5f),

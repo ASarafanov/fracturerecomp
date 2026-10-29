@@ -26,3 +26,8 @@ else()
 endif()
 
 rexglue_setup_target(fracture GPU_PLUGINS xenos)
+
+if(WIN32)
+    # Settings screen: lists the graphics adapters.
+    target_link_libraries(fracture PRIVATE dxgi)
+endif()
