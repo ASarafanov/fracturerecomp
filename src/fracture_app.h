@@ -5,6 +5,7 @@
 #pragma once
 
 #include <rex/cvar.h>
+#include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 #include <rex/ui/keybinds.h>
@@ -17,6 +18,7 @@
 #include <optional>
 #include <string>
 
+#include "fracture_menu_input.h"
 #include "fracture_settings.h"
 #include "fracture_settings_dialog.h"
 
@@ -100,13 +102,7 @@ class FractureApp : public rex::ReXApp {
                             }
                           });
     rex::ui::RegisterBind("bind_fracture_settings_alt", "F1", "Settings screen (open / close)",
-                          [this] {
-                            if (settings_dialog_) {
-                              CloseSettings();
-                            } else {
-                              OpenSettings();
-                            }
-                          });
+                          [this] { ToggleSettings(); });
 
     // Debug aid: --fracture_dump_cvars=<file> lists every cvar. The GPU
     // plugin is loaded and the binds above are registered by now, so their
@@ -117,6 +113,14 @@ class FractureApp : public rex::ReXApp {
     }
   }
 
+  // The menu chord (RB + Start by default) is seen on a guest thread, in the
+  // game's own controller read; the screen lives on the UI thread.
+  void OnPostSetup() override {
+    fracture::menu_input::Init([this] {
+      app_context().CallInUIThreadDeferred([this] { ToggleSettings(); });
+    });
+  }
+
   void OnShutdown() override {
     rex::ui::UnregisterBind("bind_fracture_settings");
     rex::ui::UnregisterBind("bind_fracture_settings_alt");
@@ -125,7 +129,6 @@ class FractureApp : public rex::ReXApp {
 
   // Override virtual hooks for customization:
   // void OnLoadXexImage(std::string& xex_image) override {}
-  // void OnPostSetup() override {}
   // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
   // std::unique_ptr<rex::ui::AchievementNotificationDialog>
   // CreateAchievementNotificationDialog() override;
@@ -151,6 +154,11 @@ class FractureApp : public rex::ReXApp {
     settings_dialog_ = std::make_unique<fracture::settings::SettingsDialog>(
         imgui_drawer(), settings_fonts_, settings_state_, std::move(callbacks));
     REXLOG_DEBUG("Settings: screen opened");
+    // The game reads an untouched controller from now on, and mouse look lets
+    // go of the cursor so the mouse can drive the screen.
+    fracture::menu_input::SetMenuOpen(true);
+    mouse_look_before_settings_ = rex::input::mnk::IsMouseLookActive();
+    rex::input::mnk::SetMouseLookActive(false);
     if (window()) {
       cursor_before_settings_ = window()->GetCursorVisibility();
       window()->SetCursorVisibility(rex::ui::Window::CursorVisibility::kVisible);
@@ -163,8 +171,18 @@ class FractureApp : public rex::ReXApp {
     }
     settings_dialog_.reset();
     REXLOG_DEBUG("Settings: screen closed");
+    fracture::menu_input::SetMenuOpen(false);
+    rex::input::mnk::SetMouseLookActive(mouse_look_before_settings_);
     if (window()) {
       window()->SetCursorVisibility(cursor_before_settings_);
+    }
+  }
+
+  void ToggleSettings() {
+    if (settings_dialog_) {
+      CloseSettings();
+    } else {
+      OpenSettings();
     }
   }
 
@@ -189,4 +207,5 @@ class FractureApp : public rex::ReXApp {
   std::unique_ptr<fracture::settings::SettingsDialog> settings_dialog_;
   rex::ui::Window::CursorVisibility cursor_before_settings_ =
       rex::ui::Window::CursorVisibility::kVisible;
+  bool mouse_look_before_settings_ = true;
 };

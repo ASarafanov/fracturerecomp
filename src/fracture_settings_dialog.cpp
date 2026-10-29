@@ -2,6 +2,7 @@
 
 #include "fracture_settings_dialog.h"
 
+#include "fracture_menu_input.h"
 #include "fracture_settings.h"
 
 #include <rex/cvar.h>
@@ -96,6 +97,38 @@ bool Pressed(ImGuiKey key) {
   return ImGui::IsKeyPressed(key, true);
 }
 
+bool AnyKeyboardKeyDown() {
+  for (int key = ImGuiKey_Tab; key <= ImGuiKey_KeypadEqual; ++key) {
+    if (ImGui::IsKeyDown(ImGuiKey(key))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Controller auto-repeat for a held direction.
+constexpr float kPadRepeatDelay = 0.35f;
+constexpr float kPadRepeatInterval = 0.09f;
+constexpr int16_t kPadStickThreshold = 16384;
+
+int Repeat(int direction, int& held, float& timer, float delta_time) {
+  if (direction == 0) {
+    held = 0;
+    return 0;
+  }
+  if (direction != held) {
+    held = direction;
+    timer = kPadRepeatDelay;
+    return direction;
+  }
+  timer -= delta_time;
+  if (timer > 0.0f) {
+    return 0;
+  }
+  timer += kPadRepeatInterval;
+  return direction;
+}
+
 }  // namespace
 
 struct SettingsDialog::Option {
@@ -117,6 +150,18 @@ struct SettingsDialog::Category {
   std::string name;
   std::string description;
   std::vector<Row> rows;
+};
+
+// What one frame of keyboard or controller input asks for.
+struct SettingsDialog::Intents {
+  int category = 0;  // -1 / +1: previous / next category
+  int move = 0;      // -1 / +1: up / down
+  int step = 0;      // -1 / +1: left / right
+  bool confirm = false;
+  bool back = false;
+  bool restart = false;
+
+  bool Any() const { return category || move || step || confirm || back || restart; }
 };
 
 struct SettingsDialog::Layout {
@@ -275,6 +320,15 @@ void SettingsDialog::BuildCategories() {
     row.restart = true;
     controls.rows.push_back(std::move(row));
   }
+  controls.rows.push_back(choice("Settings Shortcut",
+                                 "Controller buttons that open and close this screen. Escape "
+                                 "and F1 always work.",
+                                 "fracture_menu_chord",
+                                 {{"RB + Start", "rb+start"},
+                                  {"LB + RB + Start", "lb+rb+start"},
+                                  {"Back + Start", "back+start"},
+                                  {"L3 + R3", "l3+r3"},
+                                  {"Off", "none"}}));
   controls.rows.push_back(choice("Keyboard and Mouse",
                                  "Play with the keyboard as a controller (keybind_* settings).",
                                  "mnk_mode", {{"Off", "false"}, {"On", "true"}}));
@@ -495,7 +549,20 @@ void SettingsDialog::HandleInput(ImGuiIO& io, const Layout& layout) {
   // This screen draws on the background list and owns no ImGui window, so
   // ImGui only wants the keyboard or mouse when another overlay (console,
   // F4 settings) has it; typing there must not change settings here.
-  if (!io.WantCaptureKeyboard && HandleKeyboard()) {
+  if (!io.WantCaptureKeyboard) {
+    const Intents keys = KeyboardIntents();
+    if (keys.Any()) {
+      pad_active_ = false;
+    }
+    if (Apply(keys)) {
+      return;
+    }
+  }
+  const Intents pad = PadIntents(io.DeltaTime);
+  if (pad.Any()) {
+    pad_active_ = true;
+  }
+  if (Apply(pad)) {
     return;
   }
   if (!io.WantCaptureMouse) {
@@ -503,50 +570,85 @@ void SettingsDialog::HandleInput(ImGuiIO& io, const Layout& layout) {
   }
 }
 
-bool SettingsDialog::HandleKeyboard() {
+SettingsDialog::Intents SettingsDialog::KeyboardIntents() {
   // Escape is not read here: it arrives through the app's keybind, which
   // calls NavigateBack.
-  if (Pressed(ImGuiKey_Q) || Pressed(ImGuiKey_PageUp)) {
-    SelectCategory(state_.category - 1);
+  Intents in;
+  in.category = (Pressed(ImGuiKey_E) || Pressed(ImGuiKey_PageDown) ? 1 : 0) -
+                (Pressed(ImGuiKey_Q) || Pressed(ImGuiKey_PageUp) ? 1 : 0);
+  in.move = (Pressed(ImGuiKey_DownArrow) ? 1 : 0) - (Pressed(ImGuiKey_UpArrow) ? 1 : 0);
+  in.step = (Pressed(ImGuiKey_RightArrow) ? 1 : 0) - (Pressed(ImGuiKey_LeftArrow) ? 1 : 0);
+  in.confirm = Pressed(ImGuiKey_Enter) || Pressed(ImGuiKey_Space);
+  in.back = Pressed(ImGuiKey_Backspace);
+  in.restart = ImGui::IsKeyPressed(ImGuiKey_R, false);
+  return in;
+}
+
+SettingsDialog::Intents SettingsDialog::PadIntents(float delta_time) {
+  using namespace menu_input;
+  const Pad pad = LatestPad();
+  const uint16_t pressed = pad.buttons & ~pad_prev_buttons_;
+  pad_prev_buttons_ = pad.buttons;
+  const int dx = ((pad.buttons & kDpadRight) || pad.thumb_lx > kPadStickThreshold ? 1 : 0) -
+                 ((pad.buttons & kDpadLeft) || pad.thumb_lx < -kPadStickThreshold ? 1 : 0);
+  const int dy = ((pad.buttons & kDpadDown) || pad.thumb_ly < -kPadStickThreshold ? 1 : 0) -
+                 ((pad.buttons & kDpadUp) || pad.thumb_ly > kPadStickThreshold ? 1 : 0);
+  // Ignored: what was already held when the screen opened (the chord that
+  // opened it), the chord itself (it closes the screen), and, with keyboard
+  // and mouse mode on, pad input while keys are down (the keyboard drives
+  // the pad then, and its keys already act here directly).
+  const uint16_t chord = ChordMask();
+  const bool skip = !pad_seen_ || (chord != 0 && (pad.buttons & chord) == chord) ||
+                    (rex::cvar::Query<bool>("mnk_mode") && AnyKeyboardKeyDown());
+  if (!pad_seen_ && pad.buttons != 0) {
+    pad_active_ = true;  // opened from the controller: show its hints
   }
-  if (Pressed(ImGuiKey_E) || Pressed(ImGuiKey_PageDown)) {
-    SelectCategory(state_.category + 1);
+  pad_seen_ = true;
+  if (skip) {
+    pad_held_x_ = dx;
+    pad_held_y_ = dy;
+    pad_repeat_x_ = pad_repeat_y_ = kPadRepeatDelay;
+    return {};
   }
-  const bool confirm = Pressed(ImGuiKey_Enter) || Pressed(ImGuiKey_Space);
+  Intents in;
+  in.category = (pressed & kRightShoulder ? 1 : 0) - (pressed & kLeftShoulder ? 1 : 0);
+  in.move = Repeat(dy, pad_held_y_, pad_repeat_y_, delta_time);
+  in.step = Repeat(dx, pad_held_x_, pad_repeat_x_, delta_time);
+  in.confirm = (pressed & (kA | kStart)) != 0;
+  in.back = (pressed & kB) != 0;
+  in.restart = (pressed & kX) != 0;
+  return in;
+}
+
+bool SettingsDialog::Apply(const Intents& in) {
+  if (in.category) {
+    SelectCategory(state_.category + in.category);
+  }
   if (zone_ == Zone::kRail) {
-    if (Pressed(ImGuiKey_UpArrow)) {
-      SelectCategory(state_.category - 1);
+    if (in.move) {
+      SelectCategory(state_.category + in.move);
     }
-    if (Pressed(ImGuiKey_DownArrow)) {
-      SelectCategory(state_.category + 1);
-    }
-    if (Pressed(ImGuiKey_RightArrow) || confirm) {
+    if (in.step > 0 || in.confirm) {
       zone_ = Zone::kRows;
     }
   } else {
     // Categories are never empty (BuildCategories drops those).
     const auto& rows = categories_[state_.category].rows;
-    if (Pressed(ImGuiKey_UpArrow)) {
-      SelectRow(state_.row - 1);
+    if (in.move) {
+      SelectRow(state_.row + in.move);
     }
-    if (Pressed(ImGuiKey_DownArrow)) {
-      SelectRow(state_.row + 1);
+    if (in.step) {
+      Step(rows[state_.row], in.step);
     }
-    if (Pressed(ImGuiKey_LeftArrow)) {
-      Step(rows[state_.row], -1);
-    }
-    if (Pressed(ImGuiKey_RightArrow)) {
-      Step(rows[state_.row], +1);
-    }
-    if (confirm) {
+    if (in.confirm) {
       Activate(rows[state_.row]);
     }
   }
-  if (Pressed(ImGuiKey_Backspace)) {
+  if (in.back) {
     NavigateBack();
     return true;
   }
-  if (ImGui::IsKeyPressed(ImGuiKey_R, false) && !state_.pending.empty()) {
+  if (in.restart && !state_.pending.empty()) {
     if (!restart_armed_) {
       restart_armed_ = true;
     } else if (callbacks_.restart) {
@@ -571,6 +673,9 @@ void SettingsDialog::HandleMouse(ImGuiIO& io, const Layout& layout) {
     return;
   }
   const bool clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  if (mouse_moved || clicked) {
+    pad_active_ = false;
+  }
   for (int i = 0; i < int(categories_.size()); ++i) {
     if (Contains(layout.RailMin(i), layout.RailMax(i), mouse) && clicked) {
       SelectCategory(i);
@@ -736,9 +841,10 @@ void SettingsDialog::DrawScreen(ImGuiIO& io, const Layout& L) {
     DrawText(dl, fonts_.body, size, ImVec2(min.x + L.S(20.0f), (min.y + max.y - size) * 0.5f),
              kColWarn,
              restart_armed_
-                 ? std::string("Press R again to restart now. Unsaved progress is lost.")
-                 : fmt::format("{} setting{} will change after a restart. Press R to restart now.",
-                               count, count == 1 ? "" : "s"));
+                 ? fmt::format("Press {} again to restart now. Unsaved progress is lost.",
+                               pad_active_ ? "X" : "R")
+                 : fmt::format("{} setting{} will change after a restart. Press {} to restart now.",
+                               count, count == 1 ? "" : "s", pad_active_ ? "X" : "R"));
   }
 
   // Key hints.
@@ -747,13 +853,22 @@ void SettingsDialog::DrawScreen(ImGuiIO& io, const Layout& L) {
       const char* key;
       const char* label;
     };
-    std::vector<Hint> hints = {{"\xE2\x86\x91\xE2\x86\x93", "Select"},
-                               {"\xE2\x86\x90\xE2\x86\x92", "Change"},
-                               {"Enter", "Confirm"},
-                               {"Q / E", "Category"},
-                               {"Esc", "Back"}};
+    std::vector<Hint> hints;
+    if (pad_active_) {
+      hints = {{"\xE2\x86\x91\xE2\x86\x93", "Select"},
+               {"\xE2\x86\x90\xE2\x86\x92", "Change"},
+               {"A", "Confirm"},
+               {"LB / RB", "Category"},
+               {"B", "Back"}};
+    } else {
+      hints = {{"\xE2\x86\x91\xE2\x86\x93", "Select"},
+               {"\xE2\x86\x90\xE2\x86\x92", "Change"},
+               {"Enter", "Confirm"},
+               {"Q / E", "Category"},
+               {"Esc", "Back"}};
+    }
     if (!state_.pending.empty()) {
-      hints.push_back({"R", "Restart"});
+      hints.push_back({pad_active_ ? "X" : "R", "Restart"});
     }
     const float size = L.S(kSmallTextSize);
     const float chip_pad = L.S(9.0f);

@@ -14,6 +14,7 @@ include(generated/rexglue.cmake)
 set(FRACTURE_SOURCES
     src/main.cpp
     src/fracture_hooks.cpp
+    src/fracture_menu_input.cpp
     src/fracture_settings.cpp
     src/fracture_settings_dialog.cpp
 )

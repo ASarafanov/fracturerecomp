@@ -4,6 +4,7 @@
 
 #include <rex/ui/imgui_dialog.h>
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
@@ -62,6 +63,7 @@ class SettingsDialog final : public rex::ui::ImGuiDialog {
   struct Row;
   struct Category;
   struct Layout;
+  struct Intents;
   enum class Zone { kRail, kRows };
 
   void BuildCategories();
@@ -77,8 +79,10 @@ class SettingsDialog final : public rex::ui::ImGuiDialog {
   void RevertPending();
 
   void HandleInput(ImGuiIO& io, const Layout& layout);
+  Intents KeyboardIntents();
+  Intents PadIntents(float delta_time);
   // Returns true when the screen is closing or restarting.
-  bool HandleKeyboard();
+  bool Apply(const Intents& intents);
   void HandleMouse(ImGuiIO& io, const Layout& layout);
   void DrawScreen(ImGuiIO& io, const Layout& layout);
 
@@ -89,8 +93,17 @@ class SettingsDialog final : public rex::ui::ImGuiDialog {
   Zone zone_ = Zone::kRail;
   int row_scroll_ = 0;
   bool row_armed_ = false;      // a confirm row was pressed once
-  bool restart_armed_ = false;  // R was pressed once
+  bool restart_armed_ = false;  // R / X was pressed once
   ImVec2 last_mouse_pos_{-1.0f, -1.0f};
+
+  // Controller navigation.
+  bool pad_seen_ = false;      // first frame read: held buttons are not presses
+  bool pad_active_ = false;    // last input came from a controller (hints)
+  uint16_t pad_prev_buttons_ = 0;
+  int pad_held_x_ = 0;         // held direction (-1, 0, 1), for auto-repeat
+  int pad_held_y_ = 0;
+  float pad_repeat_x_ = 0.0f;  // seconds until the next repeat
+  float pad_repeat_y_ = 0.0f;
 };
 
 }  // namespace fracture::settings
